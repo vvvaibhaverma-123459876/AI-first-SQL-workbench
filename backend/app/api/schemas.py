@@ -1,4 +1,6 @@
 """Request and response schemas for the API."""
+from __future__ import annotations
+
 from datetime import datetime
 from typing import Any, Literal
 from pydantic import BaseModel, Field
@@ -7,6 +9,18 @@ from pydantic import BaseModel, Field
 class HealthResponse(BaseModel):
     status: str
     ai_provider: str
+    api_prefix: str = "/api"
+    database: str = "ok"
+
+
+class AIStatusResponse(BaseModel):
+    provider: str
+    status: Literal["connected", "not_configured", "error", "mock"]
+    active_model: str | None = None
+    base_url: str | None = None
+    available_models: list[str] = []
+    message: str
+    local_only: bool = True
 
 
 class ColumnSchema(BaseModel):
@@ -54,6 +68,7 @@ class SQLValidationResponse(BaseModel):
 
 class SQLExecutionRequest(BaseModel):
     sql: str
+    use_cache: bool = True
 
 
 class SQLExecutionResponse(BaseModel):
@@ -62,6 +77,7 @@ class SQLExecutionResponse(BaseModel):
     row_count: int
     execution_ms: int
     message: str
+    cached: bool = False
 
 
 class ExplainSQLResponse(BaseModel):
@@ -98,6 +114,59 @@ class AskRequest(BaseModel):
     prompt: str | None = None
     sql: str | None = None
     error_message: str | None = None
+
+
+class AssistantRunRequest(BaseModel):
+    question: str = Field(min_length=1)
+    execute: bool = True
+    explain: bool = True
+    use_cache: bool = True
+
+
+class AssistantStep(BaseModel):
+    name: str
+    status: Literal["success", "warning", "error", "cached", "skipped"] = "success"
+    detail: str
+
+
+class AssistantRunResponse(BaseModel):
+    status: Literal["success", "error"]
+    question: str
+    sql: str | None = None
+    result: SQLExecutionResponse | None = None
+    explanation: str | None = None
+    suggestions: list[TableSuggestion] = []
+    join_suggestions: list[str] = []
+    next_questions: list[str] = []
+    warnings: list[str] = []
+    errors: list[str] = []
+    steps: list[AssistantStep] = []
+    cached: bool = False
+    memory_id: int | None = None
+    confidence: float = 0.0
+
+
+class AssistantFeedbackRequest(BaseModel):
+    memory_id: int
+    positive: bool
+
+
+class AssistantFeedbackResponse(BaseModel):
+    stored: bool
+    memory_id: int
+    positive_feedback: int
+    negative_feedback: int
+
+
+class AssistantMemoryItem(BaseModel):
+    id: int
+    question: str
+    sql_text: str
+    confidence: float
+    use_count: int
+    positive_feedback: int
+    negative_feedback: int
+    updated_at: datetime
 
 
 class HistoryItem(BaseModel):

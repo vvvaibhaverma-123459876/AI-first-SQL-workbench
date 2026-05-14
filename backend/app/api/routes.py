@@ -1,9 +1,18 @@
 """FastAPI routes for AI SQL Studio."""
+from __future__ import annotations
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session
+
 from app.api.schemas import (
+    AIStatusResponse,
     AskRequest,
+    AssistantFeedbackRequest,
+    AssistantFeedbackResponse,
+    AssistantMemoryItem,
+    AssistantRunRequest,
+    AssistantRunResponse,
     ExplainSQLResponse,
     GenerateSQLRequest,
     HealthResponse,
@@ -20,11 +29,13 @@ from app.api.schemas import (
     SuggestTablesResponse,
     TablePreviewResponse,
 )
+from app.assistant.orchestrator import AssistantOrchestrator
 from app.core.config import get_settings
 from app.db.session import get_metadata_session
 from app.services.ai_service import AIService
 from app.services.execution_service import SQLExecutionService
 from app.services.history_service import HistoryService
+from app.services.learning_memory_service import LearningMemoryService
 from app.services.saved_query_service import SavedQueryService
 from app.services.schema_service import SchemaService
 from app.services.validation_service import SQLValidationService
@@ -36,11 +47,19 @@ execution_service = SQLExecutionService()
 ai_service = AIService()
 history_service = HistoryService()
 saved_query_service = SavedQueryService()
+assistant_orchestrator = AssistantOrchestrator()
+memory_service = LearningMemoryService()
 
 
 @router.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
-    return HealthResponse(status="ok", ai_provider=get_settings().ai_provider)
+    settings = get_settings()
+    return HealthResponse(status="ok", ai_provider=settings.ai_provider, api_prefix=settings.api_prefix, database="ok")
+
+
+@router.get("/ai/status", response_model=AIStatusResponse)
+def ai_status() -> AIStatusResponse:
+    return AIStatusResponse(**ai_service.status())
 
 
 @router.get("/schema", response_model=SchemaResponse)
@@ -69,7 +88,7 @@ def validate_sql(payload: SQLTextRequest) -> SQLValidationResponse:
 @router.post("/execute-sql", response_model=SQLExecutionResponse)
 def execute_sql(payload: SQLExecutionRequest, db: Session = Depends(get_metadata_session)) -> SQLExecutionResponse:
     try:
-        response = execution_service.execute(payload.sql)
+        response = execution_service.execute(payload.sql, metadata_db=db, use_cache=payload.use_cache)
         history_service.log(db, payload.sql, "success", response.row_count, response.execution_ms)
         return response
     except ValueError as exc:
@@ -106,6 +125,36 @@ def ask(payload: AskRequest):
         return ai_service.ask(payload.mode, payload.prompt, payload.sql, payload.error_message)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/assistant/run", response_model=AssistantRunResponse)
+def assistant_run(payload: AssistantRunRequest, db: Session = Depends(get_metadata_session)) -> AssistantRunResponse:
+    return assistant_orchestrator.run(db, payload.question, execute=payload.execute, explain=payload.explain, use_cache=payload.use_cache)
+
+
+@router.post("/assistant/feedback", response_model=AssistantFeedbackResponse)
+def assistant_feedback(payload: AssistantFeedbackRequest, db: Session = Depends(get_metadata_session)) -> AssistantFeedbackResponse:
+    item = memory_service.feedback(db, payload.memory_id, payload.positive)
+    if not item:
+        raise HTTPException(status_code=404, detail="Assistant memory item not found")
+    return AssistantFeedbackResponse(stored=True, memory_id=item.id, positive_feedback=item.positive_feedback, negative_feedback=item.negative_feedback)
+
+
+@router.get("/assistant/memory", response_model=list[AssistantMemoryItem])
+def assistant_memory(db: Session = Depends(get_metadata_session)) -> list[AssistantMemoryItem]:
+    return [
+        AssistantMemoryItem(
+            id=item.id,
+            question=item.question,
+            sql_text=item.sql_text,
+            confidence=item.confidence,
+            use_count=item.use_count,
+            positive_feedback=item.positive_feedback,
+            negative_feedback=item.negative_feedback,
+            updated_at=item.updated_at,
+        )
+        for item in memory_service.list_recent(db)
+    ]
 
 
 @router.get("/history")

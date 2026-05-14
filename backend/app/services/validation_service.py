@@ -37,7 +37,7 @@ class SQLValidationService:
                 return SQLValidationResponse(valid=False, errors=["Only SELECT or WITH queries are allowed."])
 
         normalized_sql = statement.sql(dialect="sqlite", pretty=True)
-        if apply_default_limit and " limit " not in normalized_sql.lower():
+        if apply_default_limit and not re.search(r"\blimit\b", normalized_sql, re.IGNORECASE):
             normalized_sql = f"{normalized_sql}\nLIMIT {self.settings.default_sql_limit}"
             warnings.append(f"No LIMIT found. Added default LIMIT {self.settings.default_sql_limit}.")
 

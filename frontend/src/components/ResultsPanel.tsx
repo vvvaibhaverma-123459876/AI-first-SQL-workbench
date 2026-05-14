@@ -4,7 +4,7 @@ import { useMemo } from 'react'
 import { useStudioStore } from '../store/useStudioStore'
 
 export function ResultsPanel() {
-  const { results, logs, validationWarnings, validationErrors, exportCSV } = useStudioStore()
+  const { results, logs, validationWarnings, validationErrors, exportCSV, assistantResponse } = useStudioStore()
   const columns = useMemo(() => (results?.columns ?? []).map((col) => ({ accessorKey: col, header: col })), [results])
   const table = useReactTable({ data: results?.rows ?? [], columns, getCoreRowModel: getCoreRowModel() })
 
@@ -13,7 +13,9 @@ export function ResultsPanel() {
       <div className="mb-3 flex items-center justify-between">
         <div>
           <div className="text-sm font-semibold">Results</div>
-          <div className="muted text-xs">{results ? `${results.row_count} rows · ${results.execution_ms} ms` : 'No query executed yet'}</div>
+          <div className="muted text-xs">
+            {results ? `${results.row_count} rows · ${results.cached ? 'cache hit' : `${results.execution_ms} ms`}` : 'No query executed yet'}
+          </div>
         </div>
         <button onClick={exportCSV}><Download size={14} className="mr-1 inline" />Export CSV</button>
       </div>
@@ -41,7 +43,17 @@ export function ResultsPanel() {
             ))}
           </tbody>
         </table>
+        {!results && <div className="p-6 text-sm text-slate-400">Run SQL or use Ask + Run to populate this panel.</div>}
       </div>
+
+      {assistantResponse?.next_questions?.length ? (
+        <div className="mt-3 rounded-xl border border-slate-800 p-3 text-xs">
+          <div className="font-semibold text-slate-200">Suggested next analyses</div>
+          <div className="mt-2 flex flex-wrap gap-2 text-slate-300">
+            {assistantResponse.next_questions.map((item, index) => <span key={index} className="rounded-full border border-slate-700 px-2 py-1">{item}</span>)}
+          </div>
+        </div>
+      ) : null}
 
       <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-3">
         <div className="rounded-xl border border-slate-800 p-3 text-xs">
@@ -54,7 +66,7 @@ export function ResultsPanel() {
         </div>
         <div className="rounded-xl border border-slate-800 p-3 text-xs">
           <div className="mb-2 flex items-center gap-2 font-semibold text-slate-200"><Terminal size={14} /> Logs</div>
-          <div className="space-y-1 text-slate-300">{logs.map((item, i) => <div key={i}>{item}</div>)}</div>
+          <div className="max-h-20 space-y-1 overflow-auto text-slate-300">{logs.map((item, i) => <div key={i}>{item}</div>)}</div>
         </div>
       </div>
     </div>

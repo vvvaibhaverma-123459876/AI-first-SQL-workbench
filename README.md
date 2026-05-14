@@ -1,248 +1,383 @@
-# AI SQL Studio
+# AI-first SQL Workbench — Local AI Edition
 
-AI SQL Studio is a local-first, AI-powered SQL workbench built for analysts and developers who want a modern SQL IDE experience without sending data to paid hosted services.
+A local-first AI SQL workbench that combines a React/Vite frontend, FastAPI backend, SQLite demo analytics database, safe SQL execution, and a local AI assistant powered by Ollama or a built-in mock fallback.
 
-It combines:
-- a professional SQL editor
-- schema exploration
-- safe read-only query execution
-- natural-language-to-SQL
-- SQL explanation and repair
-- saved queries and query history
-- a polished results grid
+The project is designed to be portfolio-ready: one app, local-only AI, safe SQL guardrails, assistant orchestration, caching, and a lightweight learning-memory layer.
 
-The project is designed to feel like a lightweight mix of DBeaver, VS Code, and an AI SQL copilot.
+## What changed in this edition
 
-## Highlights
+### Unified frontend + backend
 
-- **Local-first**: runs fully on your machine
-- **Public-safe**: no proprietary names, secrets, or internal data
-- **Read-only by default**: blocks unsafe SQL
-- **LLM flexibility**: supports both Ollama and Hugging Face Transformers
-- **Portfolio-ready**: modular codebase, tests, synthetic demo data, and clean UI
+- API routes now live under `/api`.
+- The React app calls `/api` by default.
+- Vite proxies `/api` to the FastAPI backend during development.
+- FastAPI can serve the built React frontend from `frontend/dist` in production.
+- Root-level `package.json`, `Makefile`, `Dockerfile`, and `docker-compose.yml` were added.
 
-## Screenshots
+### Local AI inside the app
 
-Add screenshots here after running locally:
-- `docs/screenshot-main.png`
-- `docs/screenshot-editor.png`
-- `docs/screenshot-results.png`
-- `docs/screenshot-ai-panel.png`
+- Added `/api/ai/status` to check local Ollama connectivity and installed models.
+- Default local model target: `qwen2.5-coder:7b`.
+- No external provider API keys are required.
+- If Ollama is not running, the app remains usable through a mock local fallback for demo/testing.
 
-## Features
+### Assistant orchestrator
 
-### Workbench
-- Schema explorer with tables, columns, PK/FK metadata
-- Searchable schema sidebar
-- Table preview with sample rows
-- Multi-tab SQL editor powered by Monaco
-- Query result grid with export to CSV
-- Query timing, status, row counts, and logs
-
-### AI Assistant
-- Natural language to SQL generation
-- SQL explanation in plain English
-- SQL repair for failed queries
-- Relevant table suggestions
-- Join path suggestions
-- Unified `/ask` endpoint for assistant workflows
-
-### Safety
-- Only `SELECT` and `WITH` statements are allowed
-- Single statement enforcement
-- Dangerous keywords blocked case-insensitively
-- Validation with `sqlglot`
-- Optional default `LIMIT` injection when absent
-
-### Productivity
-- Saved queries
-- Query history
-- SQL formatting
-- Keyboard shortcut: `Ctrl/Cmd + Enter` to run
-- Copy/export workflows
-
-## Architecture
+New endpoint:
 
 ```text
-AI SQL Studio/
-├── backend/
-│   ├── app/
-│   │   ├── api/
-│   │   ├── core/
-│   │   ├── db/
-│   │   ├── llm/
-│   │   ├── models/
-│   │   ├── services/
-│   │   └── utils/
-│   ├── data/
-│   ├── tests/
-│   ├── requirements.txt
-│   └── .env.example
-└── frontend/
-    ├── src/
-    │   ├── components/
-    │   ├── services/
-    │   ├── store/
-    │   ├── types/
-    │   └── utils/
-    ├── package.json
-    ├── vite.config.ts
-    └── tailwind.config.js
+POST /api/assistant/run
 ```
 
-## Tech Stack
+Flow:
 
-### Frontend
-- React
-- TypeScript
-- Vite
-- Tailwind CSS
-- Monaco Editor
-- TanStack Table
-- Zustand
-- Axios
+```text
+question
+→ schema/table suggestion
+→ local memory lookup
+→ SQL generation through local model
+→ SQL validation
+→ repair loop if needed
+→ safe execution
+→ result explanation
+→ next-question suggestions
+→ memory storage
+```
 
-### Backend
-- Python 3.11+
-- FastAPI
-- SQLAlchemy
-- Pydantic
-- pandas
-- sqlglot
-- python-dotenv
-- uvicorn
-- requests
+### Local learning memory, not fake RL
 
-### AI Backends
-- Ollama
-- Hugging Face Transformers
+This project does **not** pretend to run reinforcement learning on top of Ollama. Instead, it implements the useful local-learning layer you wanted:
 
-### Database
-- SQLite for demo analytics data
-- SQLite for app metadata
+- successful questions and generated SQL are stored locally
+- similar future questions reuse previous SQL before calling Ollama
+- usage count increases confidence
+- thumbs-up/down feedback updates confidence
+- repeated questions become faster
+- model dependency reduces over time for common analysis patterns
 
-## Local Privacy Positioning
+New endpoints:
 
-AI SQL Studio is built around a local-first workflow:
-- demo and metadata databases are local SQLite files
-- Ollama can run fully on-device
-- Hugging Face pipeline support can also run locally
-- no paid API dependency is required
+```text
+GET  /api/assistant/memory
+POST /api/assistant/feedback
+```
 
-## Quick Start
+### Result caching
 
-### 1) Backend setup
+Repeated read-only SQL queries are cached locally for faster fetching.
+
+Config:
+
+```env
+RESULT_CACHE_TTL_SECONDS=900
+```
+
+### Workbench UX upgrades
+
+- Local AI status panel
+- Assistant run trace/steps
+- Feedback buttons
+- Local learning memory panel
+- Table preview from sidebar
+- Click table to insert `SELECT *`
+- Click column to insert column name
+- Result cache indicator
+- Better backend disconnected state
+
+---
+
+## Quick start
+
+### 1. Install backend
 
 ```bash
 cd backend
 python -m venv .venv
-source .venv/bin/activate  # macOS/Linux
-# .venv\Scripts\activate   # Windows
+source .venv/bin/activate      # macOS/Linux
+# .venv\Scripts\activate       # Windows
 pip install -r requirements.txt
 cp .env.example .env
 python -m app.db.seed_demo_data
-uvicorn app.main:app --reload --port 8000
 ```
 
-### 2) Frontend setup
+### 2. Install frontend
 
 ```bash
 cd frontend
 npm install
+cp .env.example .env
+```
+
+### 3. Start both together
+
+From the project root:
+
+```bash
+npm install
 npm run dev
 ```
 
-Frontend runs on `http://localhost:5173` and expects backend on `http://localhost:8000`.
-
-## Running Ollama Locally
-
-1. Install Ollama
-2. Pull a local model, for example:
-
-```bash
-ollama pull llama3.1
-```
-
-3. In `backend/.env`, set:
-
-```env
-AI_PROVIDER=ollama
-OLLAMA_MODEL=llama3.1
-OLLAMA_BASE_URL=http://localhost:11434
-```
-
-## Using Hugging Face Locally
-
-In `backend/.env`, set:
-
-```env
-AI_PROVIDER=hf
-HF_MODEL=google/flan-t5-base
-```
-
-The backend will lazily load the model the first time it is used.
-
-## Demo Questions
-
-Try these prompts:
-- Show the top 20 users by total transaction amount in the last 30 days
-- How many onboarding attempts failed by step each month?
-- Which referral channels drove the most approved cards?
-- Compare support ticket volume by category over time
-- What is the average transaction amount by card type?
-
-## API Summary
-
-- `GET /health`
-- `GET /schema`
-- `GET /tables/{table_name}/preview`
-- `POST /generate-sql`
-- `POST /validate-sql`
-- `POST /execute-sql`
-- `POST /explain-sql`
-- `POST /repair-sql`
-- `POST /suggest-tables`
-- `POST /ask`
-- `GET /history`
-- `POST /saved-queries`
-- `GET /saved-queries`
-- `GET /saved-queries/{id}`
-- `DELETE /saved-queries/{id}`
-
-## Tests
-
-### Backend
+Or run separately:
 
 ```bash
 cd backend
-pytest
+uvicorn app.main:app --reload --port 8000
 ```
-
-### Frontend
 
 ```bash
 cd frontend
-npm run test
+npm run dev
 ```
 
-## Future Roadmap
+Open:
 
-- PostgreSQL and MySQL connection profiles
-- richer relationship graph visualizations
-- query plans and cost estimation
-- notebook mode
-- result charting
-- pinned tabs persistence
-- role-based SQL policies
-- AI semantic caching
+```text
+http://localhost:5173
+```
 
-## Limitations
+---
 
-- demo ships with SQLite only
-- local LLM quality depends on the installed model
-- SQL auto-completion is intentionally lightweight in this version
-- schema relationship inference is based on FK metadata and naming heuristics
+## Run with Ollama
 
-## License
+Install Ollama, then pull the recommended SQL/code model:
 
-MIT
+```bash
+ollama pull qwen2.5-coder:7b
+```
+
+In `backend/.env`:
+
+```env
+AI_PROVIDER=ollama
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=qwen2.5-coder:7b
+```
+
+Start backend + frontend:
+
+```bash
+npm run dev
+```
+
+The UI will show whether Ollama is connected and whether the active model is available.
+
+---
+
+## Production-style local run
+
+Build the frontend:
+
+```bash
+cd frontend
+npm run build
+```
+
+Start FastAPI:
+
+```bash
+cd backend
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+Open:
+
+```text
+http://localhost:8000
+```
+
+FastAPI will serve the built React app and the `/api` routes from the same server.
+
+---
+
+## Docker
+
+```bash
+docker compose up --build
+```
+
+The app runs at:
+
+```text
+http://localhost:8000
+```
+
+The Docker container expects Ollama on the host machine through:
+
+```env
+OLLAMA_BASE_URL=http://host.docker.internal:11434
+```
+
+---
+
+## API highlights
+
+```text
+GET  /api/health
+GET  /api/ai/status
+GET  /api/schema
+GET  /api/tables/{table_name}/preview
+POST /api/generate-sql
+POST /api/validate-sql
+POST /api/execute-sql
+POST /api/explain-sql
+POST /api/repair-sql
+POST /api/suggest-tables
+POST /api/assistant/run
+GET  /api/assistant/memory
+POST /api/assistant/feedback
+GET  /api/history
+GET  /api/saved-queries
+POST /api/saved-queries
+```
+
+Backward-compatible root routes still exist, but `/api/*` is the recommended interface.
+
+---
+
+## Architecture
+
+```text
+AI-first-SQL-workbench/
+├── backend/
+│   ├── app/
+│   │   ├── api/                  # FastAPI routes + Pydantic schemas
+│   │   ├── assistant/            # end-to-end assistant orchestration
+│   │   ├── core/                 # settings + absolute path config
+│   │   ├── db/                   # demo data + metadata init
+│   │   ├── llm/                  # local providers: Ollama, mock, optional HF
+│   │   ├── models/               # saved queries, history, memory, result cache
+│   │   ├── services/             # AI, execution, cache, schema, validation
+│   │   └── utils/
+│   ├── data/
+│   └── tests/
+├── frontend/
+│   ├── src/
+│   │   ├── components/           # workbench panels
+│   │   ├── services/             # axios API client
+│   │   ├── store/                # Zustand app state
+│   │   └── types/
+│   └── dist/                     # generated by npm run build
+├── Dockerfile
+├── docker-compose.yml
+├── Makefile
+└── package.json
+```
+
+---
+
+## Testing status
+
+Backend tests were run successfully:
+
+```text
+6 passed
+```
+
+Frontend production build was run successfully:
+
+```text
+tsc -b && vite build
+```
+
+---
+
+## Current capability score
+
+After these changes:
+
+| Area | Score |
+|---|---:|
+| Frontend/backend integration | 8/10 |
+| Local AI foundation | 7.5/10 |
+| Assistant orchestration | 7.5/10 |
+| Local learning/cache layer | 7/10 |
+| Workbench UX | 7/10 |
+| Production readiness | 6.5/10 |
+| Portfolio readiness | 7.5/10 |
+
+Overall: **7.5/10**.
+
+The project is now much closer to the intended product. The next jump to 9/10 should focus on multi-database connections, richer semantic layer, charting, stronger eval benchmarks, and advanced schema embeddings.
+
+---
+
+## Remaining roadmap to 10/10
+
+### 1. True semantic layer
+
+Add governed definitions for metrics, dimensions, business terms, and joins.
+
+```text
+semantic/metrics.yml
+semantic/joins.yml
+semantic/business_terms.yml
+```
+
+### 2. Local embeddings for schema retrieval
+
+Add a local vector index for schema/table descriptions using `sentence-transformers` + FAISS/Chroma/sqlite-vec.
+
+### 3. Multi-database connection manager
+
+Support:
+
+- SQLite
+- DuckDB
+- Postgres
+- MySQL
+- Athena later
+
+### 4. Charting and result intelligence
+
+Add:
+
+- automatic chart suggestion
+- trend detection
+- anomaly explanation
+- top contributor analysis
+- funnel/cohort helpers
+
+### 5. Evaluation harness
+
+Add golden question tests:
+
+```text
+question → expected tables → expected SQL patterns → execution check
+```
+
+Track:
+
+- SQL validity rate
+- execution success rate
+- repair success rate
+- cache hit rate
+- feedback score
+
+### 6. Stronger workbench UX
+
+Add:
+
+- close/rename tabs
+- run selected SQL
+- SQL formatter button
+- resizable panels
+- command palette
+- query folders
+- chart panel
+
+---
+
+## Positioning
+
+This is no longer just a SQL editor with an AI button.
+
+It is now a **local AI SQL workbench** with:
+
+- local model runtime support
+- assistant workflow
+- safe SQL execution
+- memory-backed learning
+- result caching
+- feedback loop
+- unified frontend/backend deployment
+
