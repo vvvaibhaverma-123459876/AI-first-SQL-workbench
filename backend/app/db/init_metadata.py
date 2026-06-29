@@ -4,4 +4,4 @@ from app.models.metadata import MetadataBase
 
 
 def init_metadata_db() -> None:
-    MetadataBase.metadata.create_all(bind=metadata_engine)
+    MetadataBase.metadata.create_all(bind=metadata_engine, checkfirst=True)
