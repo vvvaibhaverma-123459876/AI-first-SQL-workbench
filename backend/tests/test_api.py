@@ -23,7 +23,7 @@ def test_health_root_and_api_prefix(client):
         assert all(count > 0 for count in body["db_row_counts"].values())
 
 
-def test_validate_rejects_other_write_statements():
+def test_validate_rejects_other_write_statements(client):
     for sql in ["UPDATE users SET email='x'", "DROP TABLE users", "INSERT INTO users VALUES (1)"]:
         r = client.post("/api/validate-sql", json={"sql": sql})
         assert r.status_code == 200
@@ -88,7 +88,7 @@ def test_mock_ai_mode_generates_deterministic_sql(monkeypatch):
         get_provider.cache_clear()
 
 
-def test_generate_sql_degrades_gracefully_on_provider_failure(monkeypatch):
+def test_generate_sql_degrades_gracefully_on_provider_failure(client, monkeypatch):
     """If the configured provider (e.g. ollama with no local runtime reachable)
     raises, AIService._generate() must fall back to the mock provider instead of
     a 500 — this is the safety net a hosted deploy relies on if AI_MODE is ever
