@@ -1,8 +1,66 @@
 # AI SQL Studio — Local-First AI Workbench
 
-A privacy-first SQL workbench that turns plain-English questions into SQL using a local AI model (Ollama). No cloud API keys. No data sent to the internet. Everything runs on your machine.
+A privacy-first SQL workbench that turns plain-English questions into SQL. Ask a
+question, watch it get planned, generated, validated, auto-repaired if needed,
+executed read-only, and explained — all with a real seeded analytics database
+and zero required cloud API keys.
 
-**[Live demo](http://localhost:8000)** · React + FastAPI + SQLite + Ollama
+[![CI & Deploy](https://github.com/vvvaibhaverma-123459876/AI-first-SQL-workbench/actions/workflows/ci-and-deploy.yml/badge.svg)](https://github.com/vvvaibhaverma-123459876/AI-first-SQL-workbench/actions/workflows/ci-and-deploy.yml)
+![React](https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-61dafb)
+![FastAPI](https://img.shields.io/badge/backend-FastAPI-009688)
+![SQLite](https://img.shields.io/badge/database-SQLite-003b57)
+![Ollama](https://img.shields.io/badge/local%20AI-Ollama-000000)
+
+### 🚀 Live demo (mock AI)
+
+> **Set this once the Render/Railway service exists:** replace this line with
+> `**[Live demo](https://<your-deploy-url>)**` — see the "Deploy" section below
+> for the one-time hosting setup; the URL isn't known until then, so it can't be
+> hardcoded in advance.
+
+The hosted demo runs `AI_MODE=mock` — a deterministic, schema-aware assistant
+with **zero API keys and zero network calls**, not a limitation of the real
+thing. It answers the 5 suggested demo queries below (and similar questions)
+with real, validated, executable SQL against the seeded database. For actual
+free-form natural-language-to-SQL generation, run it locally with Ollama (see
+["Run with real local AI"](#run-with-real-local-ai-ollama) below).
+
+## Screenshot
+
+<!--
+  Drop a short screen recording of the AI panel here before sharing this repo
+  externally. Suggested capture: type one of the 5 suggested demo queries,
+  click Ask, and let the plan -> SQL -> result -> explanation flow play out.
+  Save it as assets/demo.gif (create the assets/ folder) and it will render
+  below.
+-->
+<!-- ![AI SQL Studio demo](assets/demo.gif) -->
+
+## Architecture
+
+```mermaid
+flowchart LR
+    Q[Plain-English question] --> S[Suggest relevant tables]
+    S --> M{Learning memory<br/>cache hit?}
+    M -- yes --> R[Return cached SQL]
+    M -- no --> G[Generate SQL]
+    G --> V[Validate<br/>read-only guardrails]
+    V -- invalid --> F[Auto-repair]
+    F --> V
+    V -- valid --> E[Execute<br/>SQLite, read-only]
+    E --> X[Explain result in plain English]
+    X --> L[Store in learning memory]
+
+    subgraph "AI_MODE=mock (the hosted demo)"
+    G -.-> GM[Deterministic canned SQL,<br/>schema-accurate, zero network calls]
+    end
+    subgraph "AI_MODE=ollama (run locally)"
+    G -.-> GO[Real local model,<br/>e.g. qwen2.5-coder:7b]
+    end
+```
+
+FastAPI serves both `/api/*` and the built React SPA from one process/port —
+see `Dockerfile`.
 
 ---
 
@@ -81,22 +139,31 @@ Everything happens locally. The only network call is to `localhost:11434` (Ollam
 
 ---
 
-## Ollama setup
+## Run with real local AI (Ollama)
+
+The hosted demo above runs in mock mode by design — it needs a real local model
+process to talk to, which a public container can't provide. Running it yourself
+with Ollama unlocks actual free-form natural-language-to-SQL generation:
 
 ```bash
 # Install Ollama: https://ollama.com
-ollama pull mistral:7b        # recommended
-# or: ollama pull qwen2.5-coder:7b
+ollama pull qwen2.5-coder:7b  # recommended for SQL generation
+# or: ollama pull mistral:7b
 # or: ollama pull llama3
 ```
 
-`start.sh` auto-detects whichever model you have installed. To override, edit `backend/.env`:
+`start.sh` auto-detects whichever model you have installed. To override, set it
+explicitly (`backend/.env` for local runs, or the `AI_MODE`/`OLLAMA_MODEL` env
+vars for Docker):
 
 ```env
-OLLAMA_MODEL=mistral:7b
+AI_MODE=ollama
+OLLAMA_MODEL=qwen2.5-coder:7b
 ```
 
-If Ollama is not running, the app falls back to a mock provider so you can still run SQL manually.
+If Ollama is not reachable — not installed, not running, or `AI_MODE=mock` —
+the app automatically falls back to the deterministic mock provider so the
+workbench stays usable either way; see `app/llm/providers.py`.
 
 ---
 
@@ -104,18 +171,22 @@ If Ollama is not running, the app falls back to a mock provider so you can still
 
 The app ships with a pre-seeded SQLite analytics database containing:
 
-| Table | Description |
-|---|---|
-| `users` | 1 000 users with country, signup date, status |
-| `transactions` | 5 000 transactions with amount, status, type |
-| `cards` | Card assignments per user |
-| `referrals` | Referral source and conversion data |
-| `support_tickets` | Open/closed tickets with category |
-| `onboarding_events` | Step-by-step onboarding funnel |
+| Table | ~Rows | Description |
+|---|---|---|
+| `users` | 900 | Users with country, signup date, marketing channel |
+| `transactions` | 17,800 | Transactions with amount, merchant, status |
+| `cards` | 700 | Card assignments per user |
+| `referrals` | 300 | Referral source and conversion data |
+| `support_tickets` | 650 | Open/waiting/resolved tickets with category |
+| `onboarding_events` | 4,450 | Step-by-step onboarding funnel |
+
+Exact live counts are always available at `GET /api/health` (`db_row_counts`).
 
 ### Suggested demo queries
 
-Try these in the AI prompt:
+Try these in the AI prompt — all 5 are verified (see
+`backend/tests/test_api.py::test_suggested_demo_questions_produce_distinct_valid_results`)
+to return distinct, valid, non-empty results even in `AI_MODE=mock`:
 
 - *Top 20 users by total transaction amount*
 - *Which referral channel has the best card activation rate?*
@@ -125,7 +196,7 @@ Try these in the AI prompt:
 
 ---
 
-## Architecture
+## Project layout
 
 ```
 AI-first-SQL-workbench/
@@ -206,6 +277,46 @@ Open `http://localhost:8000`. Expects Ollama on the host at:
 OLLAMA_BASE_URL=http://host.docker.internal:11434
 ```
 
+The production image (used for the hosted demo) instead defaults to
+`AI_MODE=mock` and binds to `$PORT` — see `Dockerfile`.
+
+---
+
+## Deploy
+
+**main auto-deploys once hosting is configured.**
+`.github/workflows/ci-and-deploy.yml` runs backend pytest, frontend build+test,
+and a Docker build on every push/PR; on push to `main` (after tests pass) it
+triggers a deploy and polls `$DEPLOY_URL/api/health` until it's live.
+`.github/workflows/health-check.yml` also pings the live URL daily and opens a
+GitHub issue if it's down. See [CONTRIBUTING.md](CONTRIBUTING.md) — PRs must be
+green before merge since merging to `main` is a live deploy.
+
+### One-time setup
+
+**Option A — Render** (matches the CI deploy job as written):
+1. Render → New → Web Service → this repo. Render builds `Dockerfile` directly.
+2. Settings → Deploy Hook → copy the URL → add it as GitHub secret
+   `RENDER_DEPLOY_HOOK`.
+3. Once you have the service's public URL, add it as GitHub repo variable
+   `DEPLOY_URL` (Settings → Secrets and variables → Actions → Variables) — both
+   `ci-and-deploy.yml`'s post-deploy check and the daily health check need it.
+4. Leave `AI_MODE` unset (the image already defaults to `mock`) unless you want
+   to point the hosted instance at a real Ollama endpoint you control.
+
+**Option B — Railway** (native GitHub integration, no GH Actions deploy step):
+1. Railway → New Project → Deploy from GitHub repo → this repository. Railway
+   detects and builds the `Dockerfile`.
+2. Generate a public domain, then set the `DEPLOY_URL` repo variable to it (for
+   the CI post-deploy check and daily health check — Railway itself doesn't
+   need this variable, only this repo's workflows do).
+3. `RENDER_DEPLOY_HOOK` / the `deploy` job's Render step is simply unused in
+   this path — Railway redeploys `main` on its own.
+
+No database or external service is required for either option — `db_row_counts`
+in `/api/health` will show the seeded SQLite demo data as soon as the container
+boots.
+
 ---
 
 ## API reference
@@ -241,7 +352,9 @@ DELETE /api/saved-queries/{id}
 All options in `backend/.env`:
 
 ```env
-AI_PROVIDER=ollama                  # ollama | mock | hf
+AI_MODE=ollama                      # ollama | mock — takes precedence over AI_PROVIDER when set;
+                                     # the production Dockerfile sets AI_MODE=mock
+AI_PROVIDER=ollama                  # ollama | mock | hf — used when AI_MODE is unset (back-compat)
 OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL=mistral:7b
 
