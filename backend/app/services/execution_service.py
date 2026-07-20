@@ -49,7 +49,12 @@ class SQLExecutionService:
                 self.cache.put(metadata_db, normalized_sql, response)
             return response
         except SQLAlchemyError as exc:
-            raise ValueError(str(exc)) from exc
+            # str(exc) includes a raw "[SQL: ...]" query dump and an internal
+            # sqlalche.me doc link; exc.orig (the underlying DBAPI exception)
+            # carries just the actionable driver message, e.g.
+            # "no such column: foo" — that's what a user should see.
+            reason = str(exc.orig) if getattr(exc, "orig", None) is not None else str(exc)
+            raise ValueError(reason) from exc
 
     def export_csv_text(self, sql: str) -> str:
         executed = self.execute(sql, metadata_db=None, use_cache=False)

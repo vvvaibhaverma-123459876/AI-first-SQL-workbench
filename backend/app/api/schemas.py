@@ -85,6 +85,7 @@ class SQLExecutionResponse(BaseModel):
 
 class ExplainSQLResponse(BaseModel):
     explanation: str
+    provider_fallback: str | None = None
 
 
 class RepairSQLRequest(BaseModel):
@@ -95,6 +96,7 @@ class RepairSQLRequest(BaseModel):
 class RepairSQLResponse(BaseModel):
     repaired_sql: str
     rationale: str
+    provider_fallback: str | None = None
 
 
 class SuggestTablesRequest(BaseModel):
@@ -110,6 +112,7 @@ class TableSuggestion(BaseModel):
 class SuggestTablesResponse(BaseModel):
     suggestions: list[TableSuggestion]
     join_suggestions: list[str] = []
+    provider_fallback: str | None = None
 
 
 class AskRequest(BaseModel):
