@@ -17,6 +17,8 @@ DEFAULT_METADATA_DB_URL = f"sqlite:///{(DATA_DIR / 'app_metadata.db').as_posix()
 
 class Settings(BaseSettings):
     app_name: str = Field(default="AI SQL Studio API", alias="APP_NAME")
+    # Keep in sync with the "version" field in the root package.json.
+    app_version: str = Field(default="1.1.0-local-ai", alias="APP_VERSION")
     debug: bool = Field(default=True, alias="DEBUG")
     api_prefix: str = Field(default="/api", alias="API_PREFIX")
 
@@ -24,6 +26,11 @@ class Settings(BaseSettings):
     metadata_db_url: str = Field(default=DEFAULT_METADATA_DB_URL, alias="METADATA_DB_URL")
 
     ai_provider: str = Field(default="ollama", alias="AI_PROVIDER")
+    # AI_MODE is the newer, deploy-facing name (ollama|mock) and takes
+    # precedence when set; AI_PROVIDER (which also accepts hf/huggingface) is
+    # kept for backward compatibility with existing local .env files and
+    # docker-compose.yml. The production Dockerfile sets AI_MODE=mock.
+    ai_mode: str | None = Field(default=None, alias="AI_MODE")
     ollama_base_url: str = Field(default="http://localhost:11434", alias="OLLAMA_BASE_URL")
     ollama_model: str = Field(default="qwen2.5-coder:7b", alias="OLLAMA_MODEL")
     ollama_explain_model: str | None = Field(default=None, alias="OLLAMA_EXPLAIN_MODEL")
@@ -45,6 +52,11 @@ class Settings(BaseSettings):
         if not value:
             return ""
         return value if value.startswith("/") else f"/{value}"
+
+    @property
+    def effective_ai_mode(self) -> str:
+        """The mode that actually decides which LLM provider gets used."""
+        return (self.ai_mode or self.ai_provider).lower()
 
 
 @lru_cache

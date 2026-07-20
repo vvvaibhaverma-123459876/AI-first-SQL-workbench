@@ -32,9 +32,12 @@ export type QueryResult = {
 
 export type Health = {
   status: string
+  app_version: string
   ai_provider: string
+  ai_mode: string
   api_prefix: string
   database: string
+  db_row_counts: Record<string, number>
 }
 
 export type AIStatus = {

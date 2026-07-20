@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import PlainTextResponse
+from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
 from app.api.schemas import (
@@ -31,7 +32,7 @@ from app.api.schemas import (
 )
 from app.assistant.orchestrator import AssistantOrchestrator
 from app.core.config import get_settings
-from app.db.session import get_metadata_session
+from app.db.session import analytics_engine, get_metadata_session
 from app.services.ai_service import AIService
 from app.services.execution_service import SQLExecutionService
 from app.services.history_service import HistoryService
@@ -54,7 +55,20 @@ memory_service = LearningMemoryService()
 @router.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
     settings = get_settings()
-    return HealthResponse(status="ok", ai_provider=settings.ai_provider, api_prefix=settings.api_prefix, database="ok")
+    inspector = inspect(analytics_engine)
+    row_counts: dict[str, int] = {}
+    with analytics_engine.connect() as conn:
+        for table_name in inspector.get_table_names():
+            row_counts[table_name] = conn.execute(text(f'SELECT COUNT(*) FROM "{table_name}"')).scalar_one()
+    return HealthResponse(
+        status="ok",
+        app_version=settings.app_version,
+        ai_provider=settings.ai_provider,
+        ai_mode=settings.effective_ai_mode,
+        api_prefix=settings.api_prefix,
+        database="ok",
+        db_row_counts=row_counts,
+    )
 
 
 @router.get("/ai/status", response_model=AIStatusResponse)

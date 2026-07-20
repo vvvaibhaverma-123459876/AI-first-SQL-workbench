@@ -1,191 +1,267 @@
-# AI-first SQL Workbench — Local AI Edition
+# AI SQL Studio — Local-First AI Workbench
 
-A local-first AI SQL workbench that combines a React/Vite frontend, FastAPI backend, SQLite demo analytics database, safe SQL execution, and a local AI assistant powered by Ollama or a built-in mock fallback.
+A privacy-first SQL workbench that turns plain-English questions into SQL. Ask a
+question, watch it get planned, generated, validated, auto-repaired if needed,
+executed read-only, and explained — all with a real seeded analytics database
+and zero required cloud API keys.
 
-The project is designed to be portfolio-ready: one app, local-only AI, safe SQL guardrails, assistant orchestration, caching, and a lightweight learning-memory layer.
+[![CI & Deploy](https://github.com/vvvaibhaverma-123459876/AI-first-SQL-workbench/actions/workflows/ci-and-deploy.yml/badge.svg)](https://github.com/vvvaibhaverma-123459876/AI-first-SQL-workbench/actions/workflows/ci-and-deploy.yml)
+![React](https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-61dafb)
+![FastAPI](https://img.shields.io/badge/backend-FastAPI-009688)
+![SQLite](https://img.shields.io/badge/database-SQLite-003b57)
+![Ollama](https://img.shields.io/badge/local%20AI-Ollama-000000)
 
-## What changed in this edition
+### 🚀 Live demo (mock AI)
 
-### Unified frontend + backend
+> **Set this once the Render/Railway service exists:** replace this line with
+> `**[Live demo](https://<your-deploy-url>)**` — see the "Deploy" section below
+> for the one-time hosting setup; the URL isn't known until then, so it can't be
+> hardcoded in advance.
 
-- API routes now live under `/api`.
-- The React app calls `/api` by default.
-- Vite proxies `/api` to the FastAPI backend during development.
-- FastAPI can serve the built React frontend from `frontend/dist` in production.
-- Root-level `package.json`, `Makefile`, `Dockerfile`, and `docker-compose.yml` were added.
+The hosted demo runs `AI_MODE=mock` — a deterministic, schema-aware assistant
+with **zero API keys and zero network calls**, not a limitation of the real
+thing. It answers the 5 suggested demo queries below (and similar questions)
+with real, validated, executable SQL against the seeded database. For actual
+free-form natural-language-to-SQL generation, run it locally with Ollama (see
+["Run with real local AI"](#run-with-real-local-ai-ollama) below).
 
-### Local AI inside the app
+## Screenshot
 
-- Added `/api/ai/status` to check local Ollama connectivity and installed models.
-- Default local model target: `qwen2.5-coder:7b`.
-- No external provider API keys are required.
-- If Ollama is not running, the app remains usable through a mock local fallback for demo/testing.
+<!--
+  Drop a short screen recording of the AI panel here before sharing this repo
+  externally. Suggested capture: type one of the 5 suggested demo queries,
+  click Ask, and let the plan -> SQL -> result -> explanation flow play out.
+  Save it as assets/demo.gif (create the assets/ folder) and it will render
+  below.
+-->
+<!-- ![AI SQL Studio demo](assets/demo.gif) -->
 
-### Assistant orchestrator
+## Architecture
 
-New endpoint:
+```mermaid
+flowchart LR
+    Q[Plain-English question] --> S[Suggest relevant tables]
+    S --> M{Learning memory<br/>cache hit?}
+    M -- yes --> R[Return cached SQL]
+    M -- no --> G[Generate SQL]
+    G --> V[Validate<br/>read-only guardrails]
+    V -- invalid --> F[Auto-repair]
+    F --> V
+    V -- valid --> E[Execute<br/>SQLite, read-only]
+    E --> X[Explain result in plain English]
+    X --> L[Store in learning memory]
 
-```text
-POST /api/assistant/run
+    subgraph "AI_MODE=mock (the hosted demo)"
+    G -.-> GM[Deterministic canned SQL,<br/>schema-accurate, zero network calls]
+    end
+    subgraph "AI_MODE=ollama (run locally)"
+    G -.-> GO[Real local model,<br/>e.g. qwen2.5-coder:7b]
+    end
 ```
 
-Flow:
-
-```text
-question
-→ schema/table suggestion
-→ local memory lookup
-→ SQL generation through local model
-→ SQL validation
-→ repair loop if needed
-→ safe execution
-→ result explanation
-→ next-question suggestions
-→ memory storage
-```
-
-### Local learning memory, not fake RL
-
-This project does **not** pretend to run reinforcement learning on top of Ollama. Instead, it implements the useful local-learning layer you wanted:
-
-- successful questions and generated SQL are stored locally
-- similar future questions reuse previous SQL before calling Ollama
-- usage count increases confidence
-- thumbs-up/down feedback updates confidence
-- repeated questions become faster
-- model dependency reduces over time for common analysis patterns
-
-New endpoints:
-
-```text
-GET  /api/assistant/memory
-POST /api/assistant/feedback
-```
-
-### Result caching
-
-Repeated read-only SQL queries are cached locally for faster fetching.
-
-Config:
-
-```env
-RESULT_CACHE_TTL_SECONDS=900
-```
-
-### Workbench UX upgrades
-
-- Local AI status panel
-- Assistant run trace/steps
-- Feedback buttons
-- Local learning memory panel
-- Table preview from sidebar
-- Click table to insert `SELECT *`
-- Click column to insert column name
-- Result cache indicator
-- Better backend disconnected state
+FastAPI serves both `/api/*` and the built React SPA from one process/port —
+see `Dockerfile`.
 
 ---
 
 ## Quick start
 
-### 1. Install backend
-
 ```bash
-cd backend
-python -m venv .venv
-source .venv/bin/activate      # macOS/Linux
-# .venv\Scripts\activate       # Windows
-pip install -r requirements.txt
-cp .env.example .env
-python -m app.db.seed_demo_data
+git clone https://github.com/vvvaibhaverma-123459876/AI-first-SQL-workbench.git
+cd AI-first-SQL-workbench
+./start.sh
 ```
 
-### 2. Install frontend
+Open **http://localhost:8000** — that's it.
 
-```bash
-cd frontend
-npm install
-cp .env.example .env
-```
+`start.sh` handles everything automatically:
+- creates the Python virtual environment
+- installs backend dependencies
+- detects your installed Ollama model
+- builds the React frontend
+- seeds the demo analytics database
+- starts the server
 
-### 3. Start both together
-
-From the project root:
-
-```bash
-npm install
-npm run dev
-```
-
-Or run separately:
-
-```bash
-cd backend
-uvicorn app.main:app --reload --port 8000
-```
-
-```bash
-cd frontend
-npm run dev
-```
-
-Open:
-
-```text
-http://localhost:5173
-```
+> **Requires:** Python 3.11+, Node.js 18+, [Ollama](https://ollama.com) with any model installed (`mistral:7b`, `qwen2.5-coder:7b`, `llama3`, etc.)
 
 ---
 
-## Run with Ollama
+## What it does
 
-Install Ollama, then pull the recommended SQL/code model:
+Type a question in plain English. The assistant:
+
+1. Suggests relevant tables from the schema
+2. Checks local memory for a cached answer
+3. Generates SQL using your local Ollama model
+4. Validates and auto-repairs the SQL if needed
+5. Executes safely (read-only guardrails)
+6. Explains the result in plain English
+7. Suggests follow-up analyses
+8. Stores the successful run locally for faster future queries
+
+Everything happens locally. The only network call is to `localhost:11434` (Ollama).
+
+---
+
+## Features
+
+### AI assistant
+- **Ask + Run** — natural language → SQL → result → explanation in one click
+- **Generate Only** — generate SQL without executing
+- **Explain** — get a plain-English explanation of any SQL
+- **Fix** — auto-repair broken SQL using the local model
+- **Suggest Tables** — identify relevant tables for a question
+
+### Editor
+- Monaco editor with SQL syntax highlighting
+- Multi-tab query workspace
+- `⌘↵` to run SQL
+- Inline save with named queries
+- One-click table/column insertion from schema browser
+
+### Results
+- Paginated data table with sticky headers
+- **Automatic bar chart** for numeric result sets
+- Clickable follow-up questions from the assistant
+- Export to CSV
+- Cache-hit indicator (repeated queries return instantly)
+
+### Schema browser
+- Collapsible table list with column types and PK/FK indicators
+- Table preview as a mini data grid
+- Full-text search across tables and columns
+
+### Learning memory
+- Successful queries stored locally
+- Reused on similar future questions (before calling Ollama)
+- Thumbs-up/down feedback adjusts confidence
+- Use count tracked — common patterns get faster over time
+
+---
+
+## Run with real local AI (Ollama)
+
+The hosted demo above runs in mock mode by design — it needs a real local model
+process to talk to, which a public container can't provide. Running it yourself
+with Ollama unlocks actual free-form natural-language-to-SQL generation:
 
 ```bash
-ollama pull qwen2.5-coder:7b
+# Install Ollama: https://ollama.com
+ollama pull qwen2.5-coder:7b  # recommended for SQL generation
+# or: ollama pull mistral:7b
+# or: ollama pull llama3
 ```
 
-In `backend/.env`:
+`start.sh` auto-detects whichever model you have installed. To override, set it
+explicitly (`backend/.env` for local runs, or the `AI_MODE`/`OLLAMA_MODEL` env
+vars for Docker):
 
 ```env
-AI_PROVIDER=ollama
-OLLAMA_BASE_URL=http://localhost:11434
+AI_MODE=ollama
 OLLAMA_MODEL=qwen2.5-coder:7b
 ```
 
-Start backend + frontend:
-
-```bash
-npm run dev
-```
-
-The UI will show whether Ollama is connected and whether the active model is available.
+If Ollama is not reachable — not installed, not running, or `AI_MODE=mock` —
+the app automatically falls back to the deterministic mock provider so the
+workbench stays usable either way; see `app/llm/providers.py`.
 
 ---
 
-## Production-style local run
+## Demo database
 
-Build the frontend:
+The app ships with a pre-seeded SQLite analytics database containing:
 
-```bash
-cd frontend
-npm run build
+| Table | ~Rows | Description |
+|---|---|---|
+| `users` | 900 | Users with country, signup date, marketing channel |
+| `transactions` | 17,800 | Transactions with amount, merchant, status |
+| `cards` | 700 | Card assignments per user |
+| `referrals` | 300 | Referral source and conversion data |
+| `support_tickets` | 650 | Open/waiting/resolved tickets with category |
+| `onboarding_events` | 4,450 | Step-by-step onboarding funnel |
+
+Exact live counts are always available at `GET /api/health` (`db_row_counts`).
+
+### Suggested demo queries
+
+Try these in the AI prompt — all 5 are verified (see
+`backend/tests/test_api.py::test_suggested_demo_questions_produce_distinct_valid_results`)
+to return distinct, valid, non-empty results even in `AI_MODE=mock`:
+
+- *Top 20 users by total transaction amount*
+- *Which referral channel has the best card activation rate?*
+- *Monthly revenue trend for the last 6 months*
+- *Users with open support tickets and their total spend*
+- *Average days to first transaction by country*
+
+---
+
+## Project layout
+
+```
+AI-first-SQL-workbench/
+├── start.sh                      ← single-command startup
+├── backend/
+│   └── app/
+│       ├── api/                  ← FastAPI routes + Pydantic schemas
+│       ├── assistant/            ← end-to-end orchestration pipeline
+│       ├── core/                 ← settings, config
+│       ├── db/                   ← demo seed data, metadata init
+│       ├── llm/                  ← Ollama, mock, optional HuggingFace
+│       ├── models/               ← SQLAlchemy metadata models
+│       ├── services/             ← AI, execution, cache, schema, validation
+│       └── utils/
+├── frontend/
+│   └── src/
+│       ├── components/           ← Sidebar, EditorPanel, ResultsPanel, AIPanel
+│       ├── services/             ← axios API client
+│       ├── store/                ← Zustand global state
+│       └── types/
+├── Dockerfile
+├── docker-compose.yml
+└── Makefile
 ```
 
-Start FastAPI:
+**Runtime flow:**
+
+```
+Browser → FastAPI (:8000)
+            ├── /api/*   → Python services → SQLite / Ollama
+            └── /*       → React SPA (served as static files)
+```
+
+No separate frontend server in production — FastAPI serves everything.
+
+---
+
+## Manual setup (alternative to start.sh)
 
 ```bash
+# Backend
 cd backend
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env          # edit OLLAMA_MODEL if needed
+python -m app.db.seed_demo_data
+
+# Frontend
+cd ../frontend
+npm install
+npm run build                 # builds into frontend/dist/
+
+# Start
+cd ../backend
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-Open:
+### Dev mode (hot reload)
 
-```text
-http://localhost:8000
+```bash
+npm install           # root — installs concurrently
+npm run dev           # starts FastAPI + Vite dev server simultaneously
 ```
 
-FastAPI will serve the built React app and the `/api` routes from the same server.
+Frontend at `http://localhost:5173`, backend at `http://localhost:8000`.
 
 ---
 
@@ -195,189 +271,108 @@ FastAPI will serve the built React app and the `/api` routes from the same serve
 docker compose up --build
 ```
 
-The app runs at:
-
-```text
-http://localhost:8000
-```
-
-The Docker container expects Ollama on the host machine through:
+Open `http://localhost:8000`. Expects Ollama on the host at:
 
 ```env
 OLLAMA_BASE_URL=http://host.docker.internal:11434
 ```
 
+The production image (used for the hosted demo) instead defaults to
+`AI_MODE=mock` and binds to `$PORT` — see `Dockerfile`.
+
 ---
 
-## API highlights
+## Deploy
 
-```text
+**main auto-deploys once hosting is configured.**
+`.github/workflows/ci-and-deploy.yml` runs backend pytest, frontend build+test,
+and a Docker build on every push/PR; on push to `main` (after tests pass) it
+triggers a deploy and polls `$DEPLOY_URL/api/health` until it's live.
+`.github/workflows/health-check.yml` also pings the live URL daily and opens a
+GitHub issue if it's down. See [CONTRIBUTING.md](CONTRIBUTING.md) — PRs must be
+green before merge since merging to `main` is a live deploy.
+
+### One-time setup
+
+**Option A — Render** (matches the CI deploy job as written):
+1. Render → New → Web Service → this repo. Render builds `Dockerfile` directly.
+2. Settings → Deploy Hook → copy the URL → add it as GitHub secret
+   `RENDER_DEPLOY_HOOK`.
+3. Once you have the service's public URL, add it as GitHub repo variable
+   `DEPLOY_URL` (Settings → Secrets and variables → Actions → Variables) — both
+   `ci-and-deploy.yml`'s post-deploy check and the daily health check need it.
+4. Leave `AI_MODE` unset (the image already defaults to `mock`) unless you want
+   to point the hosted instance at a real Ollama endpoint you control.
+
+**Option B — Railway** (native GitHub integration, no GH Actions deploy step):
+1. Railway → New Project → Deploy from GitHub repo → this repository. Railway
+   detects and builds the `Dockerfile`.
+2. Generate a public domain, then set the `DEPLOY_URL` repo variable to it (for
+   the CI post-deploy check and daily health check — Railway itself doesn't
+   need this variable, only this repo's workflows do).
+3. `RENDER_DEPLOY_HOOK` / the `deploy` job's Render step is simply unused in
+   this path — Railway redeploys `main` on its own.
+
+No database or external service is required for either option — `db_row_counts`
+in `/api/health` will show the seeded SQLite demo data as soon as the container
+boots.
+
+---
+
+## API reference
+
+```
 GET  /api/health
 GET  /api/ai/status
 GET  /api/schema
-GET  /api/tables/{table_name}/preview
+GET  /api/tables/{name}/preview
+
 POST /api/generate-sql
 POST /api/validate-sql
 POST /api/execute-sql
+POST /api/execute-sql/export
 POST /api/explain-sql
 POST /api/repair-sql
 POST /api/suggest-tables
+
 POST /api/assistant/run
 GET  /api/assistant/memory
 POST /api/assistant/feedback
+
 GET  /api/history
 GET  /api/saved-queries
 POST /api/saved-queries
-```
-
-Backward-compatible root routes still exist, but `/api/*` is the recommended interface.
-
----
-
-## Architecture
-
-```text
-AI-first-SQL-workbench/
-├── backend/
-│   ├── app/
-│   │   ├── api/                  # FastAPI routes + Pydantic schemas
-│   │   ├── assistant/            # end-to-end assistant orchestration
-│   │   ├── core/                 # settings + absolute path config
-│   │   ├── db/                   # demo data + metadata init
-│   │   ├── llm/                  # local providers: Ollama, mock, optional HF
-│   │   ├── models/               # saved queries, history, memory, result cache
-│   │   ├── services/             # AI, execution, cache, schema, validation
-│   │   └── utils/
-│   ├── data/
-│   └── tests/
-├── frontend/
-│   ├── src/
-│   │   ├── components/           # workbench panels
-│   │   ├── services/             # axios API client
-│   │   ├── store/                # Zustand app state
-│   │   └── types/
-│   └── dist/                     # generated by npm run build
-├── Dockerfile
-├── docker-compose.yml
-├── Makefile
-└── package.json
+DELETE /api/saved-queries/{id}
 ```
 
 ---
 
-## Testing status
+## Configuration
 
-Backend tests were run successfully:
+All options in `backend/.env`:
 
-```text
-6 passed
-```
+```env
+AI_MODE=ollama                      # ollama | mock — takes precedence over AI_PROVIDER when set;
+                                     # the production Dockerfile sets AI_MODE=mock
+AI_PROVIDER=ollama                  # ollama | mock | hf — used when AI_MODE is unset (back-compat)
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=mistral:7b
 
-Frontend production build was run successfully:
-
-```text
-tsc -b && vite build
+DEFAULT_ROW_LIMIT=200
+RESULT_CACHE_TTL_SECONDS=900        # cache TTL for repeated queries
+ASSISTANT_CACHE_MIN_SCORE=0.74      # similarity threshold for memory hits
+MAX_REPAIR_ATTEMPTS=2
+SQL_EXECUTION_TIMEOUT_SECONDS=30
 ```
 
 ---
 
-## Current capability score
+## Tech stack
 
-After these changes:
-
-| Area | Score |
-|---|---:|
-| Frontend/backend integration | 8/10 |
-| Local AI foundation | 7.5/10 |
-| Assistant orchestration | 7.5/10 |
-| Local learning/cache layer | 7/10 |
-| Workbench UX | 7/10 |
-| Production readiness | 6.5/10 |
-| Portfolio readiness | 7.5/10 |
-
-Overall: **7.5/10**.
-
-The project is now much closer to the intended product. The next jump to 9/10 should focus on multi-database connections, richer semantic layer, charting, stronger eval benchmarks, and advanced schema embeddings.
-
----
-
-## Remaining roadmap to 10/10
-
-### 1. True semantic layer
-
-Add governed definitions for metrics, dimensions, business terms, and joins.
-
-```text
-semantic/metrics.yml
-semantic/joins.yml
-semantic/business_terms.yml
-```
-
-### 2. Local embeddings for schema retrieval
-
-Add a local vector index for schema/table descriptions using `sentence-transformers` + FAISS/Chroma/sqlite-vec.
-
-### 3. Multi-database connection manager
-
-Support:
-
-- SQLite
-- DuckDB
-- Postgres
-- MySQL
-- Athena later
-
-### 4. Charting and result intelligence
-
-Add:
-
-- automatic chart suggestion
-- trend detection
-- anomaly explanation
-- top contributor analysis
-- funnel/cohort helpers
-
-### 5. Evaluation harness
-
-Add golden question tests:
-
-```text
-question → expected tables → expected SQL patterns → execution check
-```
-
-Track:
-
-- SQL validity rate
-- execution success rate
-- repair success rate
-- cache hit rate
-- feedback score
-
-### 6. Stronger workbench UX
-
-Add:
-
-- close/rename tabs
-- run selected SQL
-- SQL formatter button
-- resizable panels
-- command palette
-- query folders
-- chart panel
-
----
-
-## Positioning
-
-This is no longer just a SQL editor with an AI button.
-
-It is now a **local AI SQL workbench** with:
-
-- local model runtime support
-- assistant workflow
-- safe SQL execution
-- memory-backed learning
-- result caching
-- feedback loop
-- unified frontend/backend deployment
-
+| Layer | Technology |
+|---|---|
+| Frontend | React 18, TypeScript, Vite, Tailwind CSS, Zustand, Monaco Editor |
+| Backend | Python, FastAPI, SQLAlchemy, Pydantic, sqlglot |
+| AI runtime | Ollama (local) with mock fallback |
+| Database | SQLite (demo) — extensible to Postgres, DuckDB |
+| Dev tooling | concurrently, pytest, vitest |
