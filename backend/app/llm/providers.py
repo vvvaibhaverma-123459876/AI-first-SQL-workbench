@@ -5,7 +5,6 @@ while the mock provider keeps the app usable when no model runtime is installed.
 """
 from __future__ import annotations
 
-import json
 import re
 from functools import lru_cache
 from typing import Any
@@ -47,13 +46,12 @@ class MockProvider(BaseLLMProvider):
             candidate = m.group(1).strip() if m else "SELECT * FROM users LIMIT 50"
             return candidate if "limit" in candidate.lower() else candidate + "\nLIMIT 50"
         if "suggest relevant tables" in prompt_l or "respond as json" in prompt_l:
-            return json.dumps({
-                "suggestions": [
-                    {"table_name": "users", "reason": "Contains core user profile and signup fields.", "suggested_columns": ["user_id", "signup_date", "country"]},
-                    {"table_name": "transactions", "reason": "Useful for activity, monetary value, and status analysis.", "suggested_columns": ["transaction_id", "user_id", "amount", "status"]},
-                ],
-                "join_suggestions": ["users.user_id = transactions.user_id"],
-            })
+            # Mock has no real semantic understanding of table relevance for an
+            # arbitrary question. Deliberately return non-JSON so
+            # AIService.suggest_tables() falls through to its honest
+            # keyword/schema-based fallback instead of a fabricated, always-
+            # identical answer regardless of what was actually asked.
+            return "mock provider cannot semantically rank table relevance for this request"
         if "join path" in prompt_l:
             return "users.user_id = cards.user_id; users.user_id = transactions.user_id"
         return self._mock_sql_for(self._business_question(prompt))

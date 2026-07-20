@@ -191,7 +191,10 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     try {
       const { data } = await api.post('/generate-sql', { prompt: get().aiPrompt })
       get().setSQL(data.sql)
-      set((state) => ({ logs: ['Generated SQL from local AI prompt.', ...state.logs].slice(0, 20), assistantLoading: false }))
+      const message = data.provider_fallback
+        ? `Generated SQL · AI provider fallback: ${data.provider_fallback}`
+        : 'Generated SQL from local AI prompt.'
+      set((state) => ({ logs: [message, ...state.logs].slice(0, 20), assistantLoading: false }))
     } catch (error: any) {
       set((state) => ({ logs: [`Generation failed: ${error?.message ?? 'unknown error'}`, ...state.logs].slice(0, 20), assistantLoading: false }))
     }
@@ -229,7 +232,12 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     const current = currentTab(get())
     if (!current) return
     const { data } = await api.post('/explain-sql', { sql: current.sql })
-    set({ aiExplanation: data.explanation })
+    set((state) => ({
+      aiExplanation: data.explanation,
+      logs: data.provider_fallback
+        ? [`AI provider fallback: ${data.provider_fallback}`, ...state.logs].slice(0, 20)
+        : state.logs,
+    }))
   },
 
   repairSQL: async () => {
@@ -238,12 +246,21 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     const errorMessage = get().validationErrors[0] ?? ''
     const { data } = await api.post('/repair-sql', { sql: current.sql, error_message: errorMessage })
     get().setSQL(data.repaired_sql)
-    set((state) => ({ logs: ['Repaired SQL using local AI.', ...state.logs].slice(0, 20) }))
+    const message = data.provider_fallback
+      ? `${data.rationale} · AI provider fallback: ${data.provider_fallback}`
+      : data.rationale ?? 'Repaired SQL using local AI.'
+    set((state) => ({ logs: [message, ...state.logs].slice(0, 20) }))
   },
 
   suggestTables: async () => {
     const { data } = await api.post('/suggest-tables', { prompt: get().aiPrompt })
-    set({ aiSuggestions: data.suggestions, joinSuggestions: data.join_suggestions })
+    set((state) => ({
+      aiSuggestions: data.suggestions,
+      joinSuggestions: data.join_suggestions,
+      logs: data.provider_fallback
+        ? [`AI provider fallback: ${data.provider_fallback}`, ...state.logs].slice(0, 20)
+        : state.logs,
+    }))
   },
 
   sendAssistantFeedback: async (positive) => {

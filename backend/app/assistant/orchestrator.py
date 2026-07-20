@@ -21,6 +21,14 @@ class AssistantOrchestrator:
         self.history = HistoryService()
         self.memory = LearningMemoryService()
 
+    @staticmethod
+    def _note_fallback(fallback_reason: str | None, warnings: list[str], steps: list[AssistantStep]) -> None:
+        if not fallback_reason:
+            return
+        steps.append(AssistantStep(name="provider_fallback", status="warning", detail=fallback_reason))
+        if fallback_reason not in warnings:
+            warnings.append(fallback_reason)
+
     def run(self, db: Session, question: str, execute: bool = True, explain: bool = True, use_cache: bool = True) -> AssistantRunResponse:
         steps: list[AssistantStep] = []
         warnings: list[str] = []
@@ -34,6 +42,7 @@ class AssistantOrchestrator:
 
         try:
             suggestions = self.ai.suggest_tables(question)
+            self._note_fallback(suggestions.provider_fallback, warnings, steps)
             selected_tables = [item.table_name for item in suggestions.suggestions]
             steps.append(AssistantStep(name="schema_retrieval", detail=f"Selected {len(selected_tables)} relevant table(s): {', '.join(selected_tables) or 'heuristic fallback'}."))
 
@@ -48,7 +57,8 @@ class AssistantOrchestrator:
                     steps.append(AssistantStep(name="local_memory", status="cached", detail=f"Reused locally learned SQL memory with similarity score {hit.score:.2f}. Ollama was skipped."))
 
             if not sql:
-                sql = self.ai.generate_sql(question)
+                sql, fallback_reason = self.ai.generate_sql(question)
+                self._note_fallback(fallback_reason, warnings, steps)
                 steps.append(AssistantStep(name="sql_generation", detail="Generated SQL using the configured local AI provider."))
 
             # Validate and optionally repair.
@@ -58,6 +68,7 @@ class AssistantOrchestrator:
                 repair_attempts += 1
                 warnings.extend(validation.errors)
                 repaired = self.ai.repair_sql(sql, "; ".join(validation.errors))
+                self._note_fallback(repaired.provider_fallback, warnings, steps)
                 sql = repaired.repaired_sql
                 steps.append(AssistantStep(name="sql_repair", status="warning", detail=f"Repair attempt {repair_attempts}: {repaired.rationale}"))
                 validation = self.validator.validate(sql)
@@ -95,6 +106,7 @@ class AssistantOrchestrator:
                     self.history.log(db, sql, "error", 0, 0, str(exc))
                     # One final repair-and-run pass for runtime errors.
                     repaired = self.ai.repair_sql(sql, str(exc))
+                    self._note_fallback(repaired.provider_fallback, warnings, steps)
                     sql = repaired.repaired_sql
                     steps.append(AssistantStep(name="runtime_repair", status="warning", detail="Execution failed once; generated a repaired SQL candidate."))
                     result = None
@@ -104,10 +116,13 @@ class AssistantOrchestrator:
 
             if explain:
                 if result and result.rows:
-                    explanation = self.ai.explain_result(question, sql, result)
+                    explanation, fallback_reason = self.ai.explain_result(question, sql, result)
+                    self._note_fallback(fallback_reason, warnings, steps)
                     steps.append(AssistantStep(name="result_explanation", detail="Generated result-level explanation locally."))
                 elif not explanation:
-                    explanation = self.ai.explain_sql(sql).explanation
+                    explained = self.ai.explain_sql(sql)
+                    explanation = explained.explanation
+                    self._note_fallback(explained.provider_fallback, warnings, steps)
                     steps.append(AssistantStep(name="sql_explanation", detail="Generated SQL explanation locally."))
 
             confidence = self._confidence(sql=sql, result=result, cached=cached, warning_count=len(warnings), error_count=len(errors))

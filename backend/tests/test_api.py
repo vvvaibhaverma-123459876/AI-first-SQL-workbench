@@ -81,8 +81,10 @@ def test_mock_ai_mode_generates_deterministic_sql(monkeypatch):
         assert get_settings().effective_ai_mode == "mock"
         assert isinstance(get_provider(), MockProvider)
 
-        sql = AIService().generate_sql("top users by transaction amount").strip().lower()
+        sql, fallback_reason = AIService().generate_sql("top users by transaction amount")
+        sql = sql.strip().lower()
         assert sql.startswith("select") or sql.startswith("with")
+        assert fallback_reason is None
     finally:
         get_settings.cache_clear()
         get_provider.cache_clear()
@@ -93,7 +95,11 @@ def test_generate_sql_degrades_gracefully_on_provider_failure(client, monkeypatc
     raises, AIService._generate() must fall back to the mock provider instead of
     a 500 — this is the safety net a hosted deploy relies on if AI_MODE is ever
     misconfigured. Patches the provider directly (rather than relying on a real
-    connection-refused timeout) so this stays fast and deterministic."""
+    connection-refused timeout) so this stays fast and deterministic.
+
+    The fallback itself must also be *visible* in the response (see
+    tests/test_demo_quality_audit.py, finding 4) rather than silently
+    substituted with no trace — a fallback the user can't see is a lie."""
     from app.api.routes import ai_service
 
     def boom(_prompt: str) -> str:
@@ -104,6 +110,7 @@ def test_generate_sql_degrades_gracefully_on_provider_failure(client, monkeypatc
     r = client.post("/api/generate-sql", json={"prompt": "count of users per country"})
     assert r.status_code == 200
     assert r.json()["sql"].strip()
+    assert r.json()["provider_fallback"], "fallback must be reported to the caller, not silently swallowed"
 
 
 README_SUGGESTED_DEMO_QUESTIONS = [
@@ -138,7 +145,7 @@ def test_suggested_demo_questions_produce_distinct_valid_results(monkeypatch):
         executor = SQLExecutionService()
         seen_sql = set()
         for question in README_SUGGESTED_DEMO_QUESTIONS:
-            sql = svc.generate_sql(question)
+            sql, _fallback_reason = svc.generate_sql(question)
             validation = validator.validate(sql)
             assert validation.valid, f"{question!r} -> invalid SQL: {validation.errors}"
             result = executor.execute(validation.normalized_sql, use_cache=False)

@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 
 from app.api.schemas import ExplainSQLResponse, RepairSQLResponse, SQLExecutionResponse, SuggestTablesResponse, TableSuggestion
 from app.llm.providers import MockProvider, get_provider
 from app.services.schema_service import SchemaService
 from app.utils.schema_text import schema_to_prompt_text
+
+logger = logging.getLogger(__name__)
 
 
 class AIService:
@@ -19,18 +22,22 @@ class AIService:
     def status(self) -> dict:
         return self.provider.status()
 
-    def _generate(self, prompt_text: str) -> str:
+    def _generate(self, prompt_text: str) -> tuple[str, str | None]:
+        """Returns (text, fallback_reason). fallback_reason is None on the
+        happy path and a human-readable explanation whenever the real
+        provider failed and mock output was substituted instead — callers
+        must surface this to the user rather than silently swallowing it."""
         try:
-            return self.provider.generate(prompt_text)
+            return self.provider.generate(prompt_text), None
         except Exception as exc:
-            # Do not break the whole workbench if Ollama is not running. The UI will
-            # still show provider status, while mock keeps demos/tests functional.
-            return self.fallback.generate(f"{prompt_text}\n\nProvider failure fallback reason: {exc}")
+            reason = f"{self.provider.provider_name} provider failed ({exc}); used local mock fallback instead."
+            logger.warning("AI provider fallback: %s", reason)
+            return self.fallback.generate(f"{prompt_text}\n\nProvider failure fallback reason: {exc}"), reason
 
     def _schema_text(self) -> str:
         return schema_to_prompt_text(self.schema_service.get_schema())
 
-    def generate_sql(self, prompt: str) -> str:
+    def generate_sql(self, prompt: str) -> tuple[str, str | None]:
         prompt_text = f"""
 You are an expert SQLite analyst working inside a local-only SQL workbench.
 Use only the schema below. Never invent tables or columns.
@@ -46,7 +53,8 @@ Schema:
 
 Business question: {prompt}
 """
-        return self._strip_code_fences(self._generate(prompt_text))
+        raw, fallback_reason = self._generate(prompt_text)
+        return self._strip_code_fences(raw), fallback_reason
 
     def explain_sql(self, sql: str) -> ExplainSQLResponse:
         prompt_text = f"""
@@ -59,9 +67,10 @@ SQL:
 {sql}
 ```
 """
-        return ExplainSQLResponse(explanation=self._generate(prompt_text))
+        explanation, fallback_reason = self._generate(prompt_text)
+        return ExplainSQLResponse(explanation=explanation, provider_fallback=fallback_reason)
 
-    def explain_result(self, question: str, sql: str, result: SQLExecutionResponse) -> str:
+    def explain_result(self, question: str, sql: str, result: SQLExecutionResponse) -> tuple[str, str | None]:
         sample_rows = result.rows[:10]
         prompt_text = f"""
 Explain the query result for an analyst.
@@ -78,7 +87,8 @@ Row count: {result.row_count}
 Sample rows JSON:
 {json.dumps(sample_rows, default=str)}
 """
-        return self._generate(prompt_text).strip()
+        text, fallback_reason = self._generate(prompt_text)
+        return text.strip(), fallback_reason
 
     def repair_sql(self, sql: str, error_message: str = "") -> RepairSQLResponse:
         prompt_text = f"""
@@ -95,8 +105,13 @@ SQL:
 {sql}
 ```
 """
-        repaired = self._strip_code_fences(self._generate(prompt_text))
-        return RepairSQLResponse(repaired_sql=repaired, rationale="Generated a safer or syntactically corrected read-only SQL statement.")
+        raw, fallback_reason = self._generate(prompt_text)
+        repaired = self._strip_code_fences(raw)
+        if self._normalize_sql(repaired) == self._normalize_sql(sql):
+            rationale = "No automatic correction could be generated; the original SQL was returned unchanged. Please review the query manually."
+        else:
+            rationale = "Generated a safer or syntactically corrected read-only SQL statement."
+        return RepairSQLResponse(repaired_sql=repaired, rationale=rationale, provider_fallback=fallback_reason)
 
     def suggest_tables(self, prompt: str) -> SuggestTablesResponse:
         schema = self.schema_service.get_schema()
@@ -110,7 +125,7 @@ Schema:
 {schema_to_prompt_text(schema)}
 Request: {prompt}
 """
-        raw = self._generate(prompt_text)
+        raw, fallback_reason = self._generate(prompt_text)
         try:
             payload = json.loads(self._extract_json(raw))
             suggestions = [TableSuggestion(**item) for item in payload.get("suggestions", [])]
@@ -123,7 +138,7 @@ Request: {prompt}
                     suggestion.suggested_columns = [col for col in suggestion.suggested_columns if col in table_map[suggestion.table_name]][:8]
                     filtered.append(suggestion)
             if filtered:
-                return SuggestTablesResponse(suggestions=filtered[:6], join_suggestions=joins[:6])
+                return SuggestTablesResponse(suggestions=filtered[:6], join_suggestions=joins[:6], provider_fallback=fallback_reason)
         except Exception:
             pass
 
@@ -136,11 +151,12 @@ Request: {prompt}
         if not fallback:
             fallback = [TableSuggestion(table_name=table.name, reason="Included as general schema context.", suggested_columns=[c.name for c in table.columns[:5]]) for table in schema.tables[:3]]
         joins = self._heuristic_join_suggestions(schema)
-        return SuggestTablesResponse(suggestions=fallback[:5], join_suggestions=joins[:5])
+        return SuggestTablesResponse(suggestions=fallback[:5], join_suggestions=joins[:5], provider_fallback=fallback_reason)
 
     def ask(self, mode: str, prompt: str | None = None, sql: str | None = None, error_message: str | None = None):
         if mode == "generate":
-            return {"sql": self.generate_sql(prompt or "")}
+            sql_text, fallback_reason = self.generate_sql(prompt or "")
+            return {"sql": sql_text, "provider_fallback": fallback_reason}
         if mode == "explain":
             return self.explain_sql(sql or "").model_dump()
         if mode == "repair":
@@ -148,6 +164,15 @@ Request: {prompt}
         if mode == "suggest":
             return self.suggest_tables(prompt or "").model_dump()
         raise ValueError(f"Unsupported mode: {mode}")
+
+    @staticmethod
+    def _normalize_sql(text: str) -> str:
+        """Whitespace/case/trailing-semicolon-insensitive comparison, and
+        also ignores a trailing LIMIT clause: appending a LIMIT does not fix
+        the kind of error repair_sql is invoked for (missing table/column,
+        syntax error), so it must not by itself count as a "real" repair."""
+        normalized = re.sub(r"\s+", " ", (text or "").strip()).rstrip(";").strip().lower()
+        return re.sub(r"\s+limit\s+\d+\s*$", "", normalized).strip()
 
     @staticmethod
     def _strip_code_fences(text: str) -> str:

@@ -91,7 +91,8 @@ def preview_table(table_name: str) -> TablePreviewResponse:
 
 @router.post("/generate-sql")
 def generate_sql(payload: GenerateSQLRequest):
-    return {"sql": ai_service.generate_sql(payload.prompt)}
+    sql, fallback_reason = ai_service.generate_sql(payload.prompt)
+    return {"sql": sql, "provider_fallback": fallback_reason}
 
 
 @router.post("/validate-sql", response_model=SQLValidationResponse)
