@@ -104,3 +104,47 @@ def test_generate_sql_degrades_gracefully_on_provider_failure(monkeypatch):
     r = client.post("/api/generate-sql", json={"prompt": "count of users per country"})
     assert r.status_code == 200
     assert r.json()["sql"].strip()
+
+
+README_SUGGESTED_DEMO_QUESTIONS = [
+    "Top 20 users by total transaction amount",
+    "Which referral channel has the best card activation rate?",
+    "Monthly revenue trend for the last 6 months",
+    "Users with open support tickets and their total spend",
+    "Average days to first transaction by country",
+]
+
+
+def test_suggested_demo_questions_produce_distinct_valid_results(monkeypatch):
+    """The 5 "Suggested demo queries" in the README are what a LinkedIn visitor
+    is most likely to click first in mock mode. Each must produce valid,
+    non-empty, and — critically — *distinct* SQL: MockProvider.generate()'s
+    prompt includes the full schema text ahead of the actual question, so a
+    naive keyword match against the whole prompt would spuriously match every
+    table/column name and collapse all 5 onto the same canned query, which
+    regression-tested here."""
+    from app.services.execution_service import SQLExecutionService
+    from app.services.validation_service import SQLValidationService
+    from app.services.ai_service import AIService
+    from app.core.config import get_settings
+    from app.llm.providers import get_provider
+
+    monkeypatch.setenv("AI_MODE", "mock")
+    get_settings.cache_clear()
+    get_provider.cache_clear()
+    try:
+        svc = AIService()
+        validator = SQLValidationService()
+        executor = SQLExecutionService()
+        seen_sql = set()
+        for question in README_SUGGESTED_DEMO_QUESTIONS:
+            sql = svc.generate_sql(question)
+            validation = validator.validate(sql)
+            assert validation.valid, f"{question!r} -> invalid SQL: {validation.errors}"
+            result = executor.execute(validation.normalized_sql, use_cache=False)
+            assert result.row_count > 0, f"{question!r} -> empty result set"
+            seen_sql.add(sql)
+        assert len(seen_sql) == len(README_SUGGESTED_DEMO_QUESTIONS), "expected distinct SQL per demo question"
+    finally:
+        get_settings.cache_clear()
+        get_provider.cache_clear()

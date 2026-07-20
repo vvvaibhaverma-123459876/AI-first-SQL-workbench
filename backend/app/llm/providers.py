@@ -56,7 +56,81 @@ class MockProvider(BaseLLMProvider):
             })
         if "join path" in prompt_l:
             return "users.user_id = cards.user_id; users.user_id = transactions.user_id"
-        return "SELECT u.user_id, u.full_name, SUM(t.amount) AS total_amount\nFROM users u\nJOIN transactions t ON u.user_id = t.user_id\nGROUP BY u.user_id, u.full_name\nORDER BY total_amount DESC\nLIMIT 20"
+        return self._mock_sql_for(self._business_question(prompt))
+
+    @staticmethod
+    def _business_question(prompt: str) -> str:
+        """generate_sql's prompt template embeds the *entire* schema ahead of
+        the actual question, under a "Business question:" marker — matching
+        keywords against the raw prompt would spuriously hit every table/column
+        name in the schema dump on every call. Isolate just the question."""
+        marker = "business question:"
+        idx = prompt.lower().rfind(marker)
+        return prompt[idx + len(marker):].lower() if idx != -1 else prompt.lower()
+
+    # Keyword-matched canned SQL for generate-sql / ask prompts. Deliberately
+    # covers the README's 5 suggested demo queries (and near-paraphrases) with
+    # distinct, schema-accurate SQL each — a single generic fallback here would
+    # make every demo question return the same chart, which looks broken rather
+    # than "mock". Falls through to the original top-users-by-spend query for
+    # anything else, same as before.
+    def _mock_sql_for(self, prompt_l: str) -> str:
+        if "referral" in prompt_l and ("activation" in prompt_l or "card" in prompt_l):
+            return (
+                "SELECT r.channel,\n"
+                "       COUNT(DISTINCT r.referred_user_id) AS referred_users,\n"
+                "       COUNT(DISTINCT CASE WHEN c.status = 'active' THEN c.user_id END) AS activated_users,\n"
+                "       ROUND(100.0 * COUNT(DISTINCT CASE WHEN c.status = 'active' THEN c.user_id END)\n"
+                "             / NULLIF(COUNT(DISTINCT r.referred_user_id), 0), 1) AS activation_rate_pct\n"
+                "FROM referrals r\n"
+                "LEFT JOIN cards c ON c.user_id = r.referred_user_id\n"
+                "GROUP BY r.channel\n"
+                "ORDER BY activation_rate_pct DESC\n"
+                "LIMIT 20"
+            )
+        if "monthly" in prompt_l and "revenue" in prompt_l:
+            return (
+                "SELECT strftime('%Y-%m', transaction_at) AS month, SUM(amount) AS revenue\n"
+                "FROM transactions\n"
+                "WHERE status = 'success'\n"
+                "GROUP BY month\n"
+                "ORDER BY month DESC\n"
+                "LIMIT 6"
+            )
+        if "support ticket" in prompt_l:
+            return (
+                "SELECT u.user_id, u.full_name,\n"
+                "       COUNT(DISTINCT st.ticket_id) AS open_tickets,\n"
+                "       COALESCE(SUM(t.amount), 0) AS total_spend\n"
+                "FROM users u\n"
+                "JOIN support_tickets st ON st.user_id = u.user_id AND st.status = 'open'\n"
+                "LEFT JOIN transactions t ON t.user_id = u.user_id AND t.status = 'success'\n"
+                "GROUP BY u.user_id, u.full_name\n"
+                "ORDER BY total_spend DESC\n"
+                "LIMIT 20"
+            )
+        if "days to first transaction" in prompt_l or ("days" in prompt_l and "first transaction" in prompt_l):
+            return (
+                "SELECT u.country,\n"
+                "       ROUND(AVG(julianday(ft.first_transaction_at) - julianday(u.signup_date)), 1) AS avg_days_to_first_transaction\n"
+                "FROM users u\n"
+                "JOIN (\n"
+                "    SELECT user_id, MIN(transaction_at) AS first_transaction_at\n"
+                "    FROM transactions\n"
+                "    GROUP BY user_id\n"
+                ") ft ON ft.user_id = u.user_id\n"
+                "GROUP BY u.country\n"
+                "ORDER BY avg_days_to_first_transaction ASC\n"
+                "LIMIT 20"
+            )
+        return (
+            "SELECT u.user_id, u.full_name, SUM(t.amount) AS total_amount\n"
+            "FROM users u\n"
+            "JOIN transactions t ON u.user_id = t.user_id\n"
+            "GROUP BY u.user_id, u.full_name\n"
+            "ORDER BY total_amount DESC\n"
+            "LIMIT 20"
+        )
 
     def status(self) -> dict[str, Any]:
         return {
