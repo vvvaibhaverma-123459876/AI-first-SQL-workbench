@@ -149,7 +149,7 @@ class HuggingFaceProvider(BaseLLMProvider):
 
 @lru_cache
 def get_provider() -> BaseLLMProvider:
-    provider = get_settings().ai_provider.lower()
+    provider = get_settings().effective_ai_mode
     if provider == "ollama":
         return OllamaProvider()
     if provider in {"hf", "huggingface", "huggingface-local"}:

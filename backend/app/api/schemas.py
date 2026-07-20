@@ -8,9 +8,12 @@ from pydantic import BaseModel, Field
 
 class HealthResponse(BaseModel):
     status: str
+    app_version: str
     ai_provider: str
+    ai_mode: str
     api_prefix: str = "/api"
     database: str = "ok"
+    db_row_counts: dict[str, int] = Field(default_factory=dict)
 
 
 class AIStatusResponse(BaseModel):
