@@ -68,6 +68,46 @@ jobs:
         working-directory: frontend
         run: npm run test -- --run
 
+      - name: Install Playwright browsers
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Start backend for e2e smoke test
+        working-directory: backend
+        env:
+          CONTROL_PLANE_DB_URL: postgresql+asyncpg://sqlstudio:sqlstudio@localhost:5432/sqlstudio
+          AI_MODE: mock
+          JWT_SECRET: insecure-dev-secret-change-me
+        run: |
+          nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 > /tmp/backend-e2e.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8000/api/health > /dev/null && exit 0
+            sleep 1
+          done
+          echo "::error::Backend never became healthy for e2e"; cat /tmp/backend-e2e.log; exit 1
+
+      - name: Start frontend dev server for e2e smoke test
+        working-directory: frontend
+        run: |
+          nohup npm run dev -- --port 5173 --strictPort > /tmp/frontend-e2e.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:5173 > /dev/null && exit 0
+            sleep 1
+          done
+          echo "::error::Frontend dev server never became healthy for e2e"; cat /tmp/frontend-e2e.log; exit 1
+
+      - name: End-to-end IDE smoke test (Playwright)
+        working-directory: frontend
+        run: npm run test:e2e
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 7
+
       - uses: docker/setup-buildx-action@v3
       - name: Docker build (catches image breakage before Render/Railway sees it)
         uses: docker/build-push-action@v6

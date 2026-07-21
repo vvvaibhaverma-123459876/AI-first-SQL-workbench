@@ -27,7 +27,9 @@ function TreeNode({ workspaceId, node, depth }: { workspaceId: string; node: Fil
   const handleAddChild = async (e: React.MouseEvent, isFolder: boolean) => {
     e.stopPropagation()
     const name = prompt(isFolder ? 'Folder name' : 'File name (e.g. query.sql)')
-    if (name) await createFile(workspaceId, { name, parentId: node.id, isFolder })
+    if (!name) return
+    const created = await createFile(workspaceId, { name, parentId: node.id, isFolder })
+    if (!isFolder) await openFile(workspaceId, created.id)
   }
 
   return (
@@ -66,7 +68,7 @@ function TreeNode({ workspaceId, node, depth }: { workspaceId: string; node: Fil
 }
 
 export function FileTree({ workspaceId }: { workspaceId: string }) {
-  const { files, createFile } = useFileStore()
+  const { files, createFile, openFile } = useFileStore()
   const roots = children(files, null)
 
   return (
@@ -79,7 +81,9 @@ export function FileTree({ workspaceId }: { workspaceId: string }) {
             title="New file"
             onClick={async () => {
               const name = prompt('File name (e.g. query.sql)')
-              if (name) await createFile(workspaceId, { name, parentId: null })
+              if (!name) return
+              const created = await createFile(workspaceId, { name, parentId: null })
+              await openFile(workspaceId, created.id)
             }}
           >
             <FilePlus size={13} />
