@@ -40,6 +40,14 @@ class MockProvider(BaseLLMProvider):
         # the parameter only so it satisfies the same interface as the real
         # providers and callers don't need to special-case it.
         prompt_l = prompt.lower()
+        if "investigation report" in prompt_l:
+            return (
+                "**Summary:** The primary question and its automatic follow-up were both answered "
+                "from the live query results above -- see each step for the exact SQL and row counts. "
+                "Nothing in the sample rows stands out as an anomaly beyond what the numbers already show.\n\n"
+                "**Suggested next step:** Drill into whichever segment from the follow-up step has the "
+                "largest share of rows, to see whether it explains the primary result."
+            )
         if "explain the query result" in prompt_l or "result summary" in prompt_l:
             return "The result set has been generated successfully. Review the row counts, groupings, and totals before making a business decision."
         if "explain" in prompt_l:
