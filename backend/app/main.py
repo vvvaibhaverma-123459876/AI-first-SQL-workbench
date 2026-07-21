@@ -28,6 +28,15 @@ from app.db.control_plane import init_control_plane_db
 from app.db.init_metadata import init_metadata_db
 from app.db.seed_demo_data import build
 from app.ai_jobs.routes import router as ai_jobs_router
+# SchemaEmbedding is deliberately never imported at module level anywhere
+# else (ai_service.py and connections/routes.py both import it lazily,
+# function-local, to stay clear of the import-order bug documented above)
+# -- but init_control_plane_db()'s create_all still needs it registered
+# with ControlPlaneBase.metadata before that runs in lifespan() below, or
+# the schema_embeddings table never gets created on a dev/test sqlite
+# boot. This import is safe here: it lands after app.auth.backend already
+# has.
+from app.connections.embedding_models import SchemaEmbedding  # noqa: F401
 from app.connections.routes import router as connections_router
 from app.files.routes import router as files_router
 from app.workspaces.routes import router as workspaces_router

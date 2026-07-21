@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.auth.models import User  # noqa: E402,F401
 
 from app.ai_jobs.models import AiJob  # noqa: E402,F401
+from app.connections.embedding_models import SchemaEmbedding  # noqa: E402,F401
 from app.connections.models import DataConnection  # noqa: E402,F401
 from app.core.config import get_settings  # noqa: E402
 from app.db.control_plane import ControlPlaneBase  # noqa: E402

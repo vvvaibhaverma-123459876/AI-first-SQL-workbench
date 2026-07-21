@@ -10,7 +10,12 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16-alpine
+        # pgvector/pgvector:pg16, not stock postgres:16-alpine: Phase 3d's
+        # schema_embeddings table needs CREATE EXTENSION vector. Same
+        # cluster serves both the sqlstudio control-plane DB and (via
+        # TEST_POSTGRES_URL below) the postgres db used by the connector
+        # test suite -- one image swap covers both.
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: sqlstudio
           POSTGRES_PASSWORD: sqlstudio
