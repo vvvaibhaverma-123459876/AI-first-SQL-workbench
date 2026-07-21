@@ -8,13 +8,14 @@ import { QueryRunner } from './QueryRunner'
 import { InvestigatePanel } from './InvestigatePanel'
 import { DashboardsPanel } from './DashboardsPanel'
 import { DashboardView } from './DashboardView'
+import { ScheduledQueriesPanel } from './ScheduledQueriesPanel'
 import { CommandPalette, type Command } from './CommandPalette'
 import { useFileStore } from '../../store/useFileStore'
 
 export function IdeShell({ workspaceId, onOpenLegacy }: { workspaceId: string; onOpenLegacy: () => void }) {
   const { loadFiles, createFile, activeTabId, openTabs, saveNow } = useFileStore()
   const [overlay, setOverlay] = useState<'none' | 'quickOpen' | 'search' | 'palette'>('none')
-  const [sidebarTab, setSidebarTab] = useState<'files' | 'connections' | 'investigate' | 'dashboards'>('files')
+  const [sidebarTab, setSidebarTab] = useState<'files' | 'connections' | 'investigate' | 'dashboards' | 'scheduled'>('files')
   const [openDashboardId, setOpenDashboardId] = useState<string | null>(null)
   const activeTab = openTabs.find((t) => t.fileId === activeTabId)
   const isSqlFile = activeTab?.name.endsWith('.sql') ?? false
@@ -82,6 +83,12 @@ export function IdeShell({ workspaceId, onOpenLegacy }: { workspaceId: string; o
           >
             Dashboards
           </button>
+          <button
+            className={`flex-1 !rounded-none !border-0 !border-b-2 !bg-transparent py-1.5 text-xs ${sidebarTab === 'scheduled' ? '!border-b-blue-500 text-slate-100' : '!border-b-transparent text-slate-400'}`}
+            onClick={() => setSidebarTab('scheduled')}
+          >
+            Scheduled
+          </button>
         </div>
         <div className="min-h-0 flex-1 overflow-hidden">
           {sidebarTab === 'files' && <FileTree workspaceId={workspaceId} />}
@@ -95,6 +102,7 @@ export function IdeShell({ workspaceId, onOpenLegacy }: { workspaceId: string; o
               }}
             />
           )}
+          {sidebarTab === 'scheduled' && <ScheduledQueriesPanel workspaceId={workspaceId} />}
         </div>
       </div>
       <div className="col-span-9 flex min-h-0 flex-col gap-3">

@@ -223,3 +223,24 @@ export type DashboardItem = {
 export type DashboardDetail = Dashboard & {
   items: DashboardItem[]
 }
+
+export type ScheduleCondition = 'always' | 'threshold' | 'diff'
+
+export type ScheduledQuery = {
+  id: string
+  connection_id: string
+  name: string
+  sql: string
+  cron_expression: string
+  condition: ScheduleCondition
+  condition_value: number | null
+  notify_webhook_url: string | null
+  notify_email: string | null
+  is_active: boolean
+  last_enqueued_at: string | null
+  last_run_at: string | null
+  last_status: string | null
+  last_row_count: number | null
+  last_notified_at: string | null
+  created_at: string
+}
