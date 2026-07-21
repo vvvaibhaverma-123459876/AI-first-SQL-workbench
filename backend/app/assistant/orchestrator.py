@@ -99,7 +99,7 @@ class AssistantOrchestrator:
         confidence = 0.55
 
         try:
-            suggestions = self.ai.suggest_tables(question, schema=schema)
+            suggestions = self.ai.suggest_tables(question, schema=schema, connection=connection)
             self._note_fallback(suggestions.provider_fallback, warnings, steps)
             selected_tables = [item.table_name for item in suggestions.suggestions]
             steps.append(AssistantStep(name="schema_retrieval", detail=f"Selected {len(selected_tables)} relevant table(s): {', '.join(selected_tables) or 'heuristic fallback'}."))

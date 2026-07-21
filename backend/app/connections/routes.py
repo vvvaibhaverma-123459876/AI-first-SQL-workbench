@@ -119,6 +119,64 @@ async def get_schema(
         raise HTTPException(status_code=502, detail=f"Could not read schema: {exc}") from exc
 
 
+def _refresh_embeddings_sync(connection) -> bool:
+    # Local imports: this function runs in a threadpool worker at request
+    # time, long after app startup has finished, so there's no import-order
+    # risk here -- but kept local anyway for consistency with the same
+    # defensive pattern used in ai_service.py (see its TYPE_CHECKING note).
+    from app.assistant.orchestrator import schema_for_connection
+    from app.connections.embedding_service import refresh_embeddings
+    from app.db.control_plane_sync import get_sync_session
+    from app.llm.providers import get_provider
+
+    schema = schema_for_connection(connection)
+    session = get_sync_session()
+    try:
+        return refresh_embeddings(
+            session,
+            workspace_id=connection.workspace_id,
+            connection_id=connection.id,
+            schema=schema,
+            provider_name=get_provider().provider_name,
+        )
+    finally:
+        session.close()
+
+
+@router.post("/{connection_id}/schema/embeddings/refresh")
+async def refresh_schema_embeddings(
+    workspace_id: uuid.UUID,
+    connection_id: uuid.UUID,
+    user: User = Depends(current_active_user),
+    session: AsyncSession = Depends(get_control_plane_session),
+) -> dict:
+    """Force-recomputes this connection's semantic table-retrieval
+    embeddings (app/connections/embedding_service.py). The one known gap in
+    Phase 3d: embeddings are computed once on first use and never
+    auto-invalidated when the connection's real schema changes underneath
+    them, so this is the manual fix. Editor+ only -- it's a write to
+    control-plane state, same bar as creating a connection."""
+    await _require_editor(session, workspace_id, user.id)
+    try:
+        connection = await service.get_connection(session, workspace_id=workspace_id, connection_id=connection_id)
+    except service.ConnectionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Connection not found") from exc
+    try:
+        refreshed = await run_in_threadpool(_refresh_embeddings_sync, connection)
+    except ConnectorNotInstalledError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not refreshed:
+        return {
+            "status": "unavailable",
+            "detail": (
+                "Semantic retrieval is unavailable right now (AI_MODE is not 'ollama', "
+                "the embedding model is unreachable, or this connection has no tables) -- "
+                "keyword-based suggestion will still be used."
+            ),
+        }
+    return {"status": "refreshed"}
+
+
 @router.post("/{connection_id}/query", response_model=QueryResponse)
 async def run_query(
     workspace_id: uuid.UUID,

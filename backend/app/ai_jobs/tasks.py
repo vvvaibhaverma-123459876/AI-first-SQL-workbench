@@ -150,7 +150,7 @@ def _execute(service: AIService, job: AiJob) -> dict:
     if task_type == "repair":
         return service.repair_sql(input["sql"], input.get("error_message", ""), schema=schema, dialect=dialect).model_dump()
     if task_type == "suggest":
-        return service.suggest_tables(input["prompt"], schema=schema).model_dump()
+        return service.suggest_tables(input["prompt"], schema=schema, connection=connection).model_dump()
     raise ValueError(f"Unsupported task_type: {task_type!r}")
 
 
