@@ -147,3 +147,39 @@ export type FileSearchResult = {
   name: string
   snippet: string
 }
+
+export type ConnectorType = 'postgres' | 'mysql' | 'sqlite' | 'snowflake' | 'bigquery' | 'databricks'
+
+export type DataConnection = {
+  id: string
+  name: string
+  connector_type: ConnectorType
+  created_at: string
+  last_tested_at: string | null
+  last_test_ok: boolean | null
+}
+
+export type ConnectionColumnInfo = {
+  name: string
+  type: string
+  nullable: boolean
+}
+
+export type ConnectionTableInfo = {
+  schema_name: string | null
+  name: string
+  columns: ConnectionColumnInfo[]
+}
+
+export type ConnectionQueryResult = {
+  columns: string[]
+  rows: Record<string, unknown>[]
+  row_count: number
+  truncated: boolean
+  execution_ms: number
+}
+
+export type TestConnectionResult = {
+  ok: boolean
+  message: string
+}

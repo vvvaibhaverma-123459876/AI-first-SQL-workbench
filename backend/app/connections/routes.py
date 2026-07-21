@@ -1,0 +1,149 @@
+from __future__ import annotations
+
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.concurrency import run_in_threadpool
+
+from app.auth.backend import current_active_user
+from app.auth.models import User
+from app.connections import service
+from app.connections.drivers import ConnectorNotInstalledError
+from app.connections.schemas import (
+    DataConnectionCreate,
+    DataConnectionRead,
+    QueryRequest,
+    QueryResponse,
+    TableInfo,
+    TestConnectionResult,
+)
+from app.db.control_plane import get_control_plane_session
+from app.workspaces import service as workspace_service
+
+router = APIRouter(prefix="/workspaces/{workspace_id}/connections", tags=["connections"])
+
+
+async def _require_viewer(session: AsyncSession, workspace_id: uuid.UUID, user_id: uuid.UUID) -> None:
+    try:
+        await workspace_service.require_role(session, workspace_id=workspace_id, user_id=user_id, min_role="viewer")
+    except workspace_service.NotAMemberError as exc:
+        raise HTTPException(status_code=404, detail="Workspace not found") from exc
+
+
+async def _require_editor(session: AsyncSession, workspace_id: uuid.UUID, user_id: uuid.UUID) -> None:
+    try:
+        await workspace_service.require_role(session, workspace_id=workspace_id, user_id=user_id, min_role="editor")
+    except workspace_service.NotAMemberError as exc:
+        raise HTTPException(status_code=404, detail="Workspace not found") from exc
+    except workspace_service.InsufficientRoleError as exc:
+        raise HTTPException(status_code=403, detail="Editor or owner role required") from exc
+
+
+@router.post("", response_model=DataConnectionRead)
+async def create_connection(
+    workspace_id: uuid.UUID,
+    payload: DataConnectionCreate,
+    user: User = Depends(current_active_user),
+    session: AsyncSession = Depends(get_control_plane_session),
+) -> DataConnectionRead:
+    await _require_editor(session, workspace_id, user.id)
+    try:
+        connection = await service.create_connection(
+            session, workspace_id=workspace_id, created_by=user.id, name=payload.name, config=payload.config
+        )
+    except service.DuplicateConnectionNameError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return DataConnectionRead.model_validate(connection)
+
+
+@router.get("", response_model=list[DataConnectionRead])
+async def list_connections(
+    workspace_id: uuid.UUID,
+    user: User = Depends(current_active_user),
+    session: AsyncSession = Depends(get_control_plane_session),
+) -> list[DataConnectionRead]:
+    await _require_viewer(session, workspace_id, user.id)
+    connections = await service.list_connections(session, workspace_id=workspace_id)
+    return [DataConnectionRead.model_validate(c) for c in connections]
+
+
+@router.delete("/{connection_id}", status_code=204, response_model=None)
+async def delete_connection(
+    workspace_id: uuid.UUID,
+    connection_id: uuid.UUID,
+    user: User = Depends(current_active_user),
+    session: AsyncSession = Depends(get_control_plane_session),
+) -> None:
+    await _require_editor(session, workspace_id, user.id)
+    try:
+        await service.delete_connection(session, workspace_id=workspace_id, connection_id=connection_id)
+    except service.ConnectionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Connection not found") from exc
+
+
+@router.post("/{connection_id}/test", response_model=TestConnectionResult)
+async def test_connection(
+    workspace_id: uuid.UUID,
+    connection_id: uuid.UUID,
+    user: User = Depends(current_active_user),
+    session: AsyncSession = Depends(get_control_plane_session),
+) -> TestConnectionResult:
+    await _require_viewer(session, workspace_id, user.id)
+    try:
+        connection = await service.get_connection(session, workspace_id=workspace_id, connection_id=connection_id)
+    except service.ConnectionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Connection not found") from exc
+    result = await run_in_threadpool(service.test_connection_sync, connection)
+    await service.record_test_result(session, connection=connection, ok=result.ok)
+    return result
+
+
+@router.get("/{connection_id}/schema", response_model=list[TableInfo])
+async def get_schema(
+    workspace_id: uuid.UUID,
+    connection_id: uuid.UUID,
+    user: User = Depends(current_active_user),
+    session: AsyncSession = Depends(get_control_plane_session),
+) -> list[TableInfo]:
+    await _require_viewer(session, workspace_id, user.id)
+    try:
+        connection = await service.get_connection(session, workspace_id=workspace_id, connection_id=connection_id)
+    except service.ConnectionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Connection not found") from exc
+    try:
+        return await run_in_threadpool(service.get_schema_sync, connection)
+    except ConnectorNotInstalledError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Could not read schema: {exc}") from exc
+
+
+@router.post("/{connection_id}/query", response_model=QueryResponse)
+async def run_query(
+    workspace_id: uuid.UUID,
+    connection_id: uuid.UUID,
+    payload: QueryRequest,
+    user: User = Depends(current_active_user),
+    session: AsyncSession = Depends(get_control_plane_session),
+) -> QueryResponse:
+    # Viewers may run read-only statements against a connection (this is a
+    # read action on the workspace, mirroring "viewer can read files, not
+    # write them"); anything sqlglot can't prove is read-only requires
+    # editor+, the same bar as writing a file.
+    try:
+        connection = await service.get_connection(session, workspace_id=workspace_id, connection_id=connection_id)
+    except service.ConnectionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Connection not found") from exc
+
+    if service.is_read_only_sql(payload.sql, connector_type=connection.connector_type):
+        await _require_viewer(session, workspace_id, user.id)
+    else:
+        await _require_editor(session, workspace_id, user.id)
+
+    try:
+        return await run_in_threadpool(service.run_query_sync, connection, payload.sql)
+    except ConnectorNotInstalledError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

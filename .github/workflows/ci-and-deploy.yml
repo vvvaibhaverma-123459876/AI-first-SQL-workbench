@@ -22,6 +22,20 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_USER: sqlstudio
+          MYSQL_PASSWORD: sqlstudio
+          MYSQL_DATABASE: sqlstudio
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -u root -proot"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
 
@@ -44,6 +58,10 @@ jobs:
           # own tables via create_all(), which would collide with the
           # Alembic step below if they shared a database.
           TEST_POSTGRES_URL: postgresql+asyncpg://sqlstudio:sqlstudio@localhost:5432/postgres
+          # Real MySQL for the data-connections test suite (app/connections) --
+          # root/sqlstudio db, since the connector layer's own MySQL config
+          # fields are what's under test, not any particular user account.
+          TEST_MYSQL_URL: mysql+pymysql://root:root@localhost:3306/sqlstudio
         run: python -m pytest -q
 
       - name: Alembic migration applies cleanly to a real Postgres
@@ -96,8 +114,21 @@ jobs:
           done
           echo "::error::Frontend dev server never became healthy for e2e"; cat /tmp/frontend-e2e.log; exit 1
 
+      - name: Seed a SQLite fixture for the connections e2e test
+        run: |
+          python3 -c "
+          import sqlite3
+          conn = sqlite3.connect('${{ runner.temp }}/e2e-fixture.db')
+          conn.execute('CREATE TABLE widgets (id INTEGER PRIMARY KEY, label TEXT)')
+          conn.execute(\"INSERT INTO widgets (label) VALUES ('alpha'), ('beta')\")
+          conn.commit()
+          conn.close()
+          "
+
       - name: End-to-end IDE smoke test (Playwright)
         working-directory: frontend
+        env:
+          PLAYWRIGHT_SQLITE_FIXTURE: ${{ runner.temp }}/e2e-fixture.db
         run: npm run test:e2e
 
       - name: Upload Playwright report
