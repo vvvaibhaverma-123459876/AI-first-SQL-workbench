@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.files.models import File, FileRevision
@@ -112,14 +112,22 @@ async def delete_file(session: AsyncSession, *, workspace_id: uuid.UUID, file_id
     for f in all_files:
         by_parent.setdefault(f.parent_id, []).append(f)
 
-    to_delete: list[File] = []
+    # DFS collects every node before its own children are pushed, so in this
+    # list a parent always precedes its descendants -- reversed(), every
+    # child is deleted before its parent. Neither files.parent_id nor
+    # file_revisions.file_id cascades on delete, and Postgres enforces that
+    # immediately (unlike aiosqlite, which doesn't enforce FKs by default),
+    # so deleting in the wrong order, or leaving revisions behind, 500s on
+    # a real deployment even though it looks fine against sqlite tests.
+    subtree: list[File] = []
     stack = [file]
     while stack:
         current = stack.pop()
-        to_delete.append(current)
+        subtree.append(current)
         stack.extend(by_parent.get(current.id, []))
 
-    for f in to_delete:
+    for f in reversed(subtree):
+        await session.execute(delete(FileRevision).where(FileRevision.file_id == f.id))
         await session.delete(f)
     session.add(AuditLogEntry(workspace_id=workspace_id, user_id=deleted_by, action="file.deleted", detail=file.name))
     await session.commit()

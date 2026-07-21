@@ -8,6 +8,9 @@ enforcement on write operations.
 """
 from __future__ import annotations
 
+import os
+import uuid
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -158,3 +161,62 @@ def test_a_viewer_cannot_write_but_can_read(client, workspace_id, auth_headers):
 
     r = client.post(f"/api/workspaces/{workspace_id}/files", json={"name": "viewer-should-not-create.sql", "content": "x"}, headers=viewer_headers)
     assert r.status_code == 403
+
+
+def test_delete_nonempty_folder_with_revisions_on_real_postgres():
+    """Regression test for a real bug: delete_file deleted parents before
+    children and never deleted FileRevision rows. aiosqlite doesn't enforce
+    foreign keys by default, so every other test in this file (including
+    test_delete_folder_cascades_to_children) stayed green against that bug --
+    real Postgres enforces files.parent_id and file_revisions.file_id
+    immediately and would 500. Skipped unless TEST_POSTGRES_URL is set (CI
+    sets it to the same Postgres service used for the alembic check)."""
+    postgres_url = os.environ.get("TEST_POSTGRES_URL")
+    if not postgres_url:
+        pytest.skip("TEST_POSTGRES_URL not set -- this check needs real FK enforcement, which aiosqlite doesn't provide")
+
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.auth.models import User
+    from app.db.control_plane import ControlPlaneBase
+    from app.files import service as files_service
+    from app.workspaces.models import Workspace, WorkspaceMembership
+
+    async def _run():
+        engine = create_async_engine(postgres_url, future=True)
+        async with engine.begin() as conn:
+            await conn.run_sync(ControlPlaneBase.metadata.create_all)
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+        async with session_factory() as session:
+            user_id = uuid.uuid4()
+            session.add(User(id=user_id, email=f"{user_id}@example.com", hashed_password="x", display_name="FK Test", is_active=True, is_superuser=False, is_verified=False))
+            workspace = Workspace(name="fk-regression", created_by=user_id)
+            session.add(workspace)
+            await session.flush()
+            session.add(WorkspaceMembership(workspace_id=workspace.id, user_id=user_id, role="owner"))
+            await session.commit()
+
+            folder = await files_service.create_file(session, workspace_id=workspace.id, created_by=user_id, name="folder", is_folder=True, parent_id=None, content="")
+            child = await files_service.create_file(session, workspace_id=workspace.id, created_by=user_id, name="child.sql", is_folder=False, parent_id=folder.id, content="v1")
+
+            original_threshold = files_service.MIN_SECONDS_BETWEEN_REVISIONS
+            files_service.MIN_SECONDS_BETWEEN_REVISIONS = 0
+            try:
+                await files_service.update_file(session, workspace_id=workspace.id, file_id=child.id, updated_by=user_id, content="v2")
+            finally:
+                files_service.MIN_SECONDS_BETWEEN_REVISIONS = original_threshold
+            revisions = await files_service.list_revisions(session, workspace_id=workspace.id, file_id=child.id)
+            assert revisions, "test setup: the child must have at least one revision before delete"
+
+            # This is the actual regression check: must not raise an FK violation.
+            await files_service.delete_file(session, workspace_id=workspace.id, file_id=folder.id, deleted_by=user_id)
+
+            with pytest.raises(files_service.FileNotFoundError):
+                await files_service.get_file(session, workspace_id=workspace.id, file_id=child.id)
+
+        await engine.dispose()
+
+    asyncio.run(_run())

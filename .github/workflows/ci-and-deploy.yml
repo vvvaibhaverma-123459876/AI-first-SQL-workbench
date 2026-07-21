@@ -36,6 +36,14 @@ jobs:
 
       - name: Backend tests (pytest)
         working-directory: backend
+        env:
+          # A handful of tests need real foreign-key enforcement that
+          # aiosqlite doesn't provide (e.g. delete-cascade correctness) and
+          # are skipped without this. Points at postgres's own built-in
+          # `postgres` database, not `sqlstudio` -- these tests create their
+          # own tables via create_all(), which would collide with the
+          # Alembic step below if they shared a database.
+          TEST_POSTGRES_URL: postgresql+asyncpg://sqlstudio:sqlstudio@localhost:5432/postgres
         run: python -m pytest -q
 
       - name: Alembic migration applies cleanly to a real Postgres
