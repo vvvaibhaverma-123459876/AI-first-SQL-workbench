@@ -3,12 +3,17 @@ import { FileTree } from './FileTree'
 import { EditorTabs } from './EditorTabs'
 import { QuickOpen } from './QuickOpen'
 import { ContentSearch } from './ContentSearch'
+import { ConnectionsPanel } from './ConnectionsPanel'
+import { QueryRunner } from './QueryRunner'
 import { CommandPalette, type Command } from './CommandPalette'
 import { useFileStore } from '../../store/useFileStore'
 
 export function IdeShell({ workspaceId, onOpenLegacy }: { workspaceId: string; onOpenLegacy: () => void }) {
-  const { loadFiles, createFile, activeTabId, saveNow } = useFileStore()
+  const { loadFiles, createFile, activeTabId, openTabs, saveNow } = useFileStore()
   const [overlay, setOverlay] = useState<'none' | 'quickOpen' | 'search' | 'palette'>('none')
+  const [sidebarTab, setSidebarTab] = useState<'files' | 'connections'>('files')
+  const activeTab = openTabs.find((t) => t.fileId === activeTabId)
+  const isSqlFile = activeTab?.name.endsWith('.sql') ?? false
 
   useEffect(() => {
     loadFiles(workspaceId)
@@ -47,11 +52,34 @@ export function IdeShell({ workspaceId, onOpenLegacy }: { workspaceId: string; o
 
   return (
     <div className="grid h-full grid-cols-12 gap-3 p-3">
-      <div className="panel col-span-3 min-h-0 overflow-hidden">
-        <FileTree workspaceId={workspaceId} />
+      <div className="panel col-span-3 flex min-h-0 flex-col overflow-hidden">
+        <div className="flex border-b border-slate-800">
+          <button
+            className={`flex-1 !rounded-none !border-0 !border-b-2 !bg-transparent py-1.5 text-xs ${sidebarTab === 'files' ? '!border-b-blue-500 text-slate-100' : '!border-b-transparent text-slate-400'}`}
+            onClick={() => setSidebarTab('files')}
+          >
+            Files
+          </button>
+          <button
+            className={`flex-1 !rounded-none !border-0 !border-b-2 !bg-transparent py-1.5 text-xs ${sidebarTab === 'connections' ? '!border-b-blue-500 text-slate-100' : '!border-b-transparent text-slate-400'}`}
+            onClick={() => setSidebarTab('connections')}
+          >
+            Connections
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-hidden">
+          {sidebarTab === 'files' ? <FileTree workspaceId={workspaceId} /> : <ConnectionsPanel workspaceId={workspaceId} />}
+        </div>
       </div>
-      <div className="panel col-span-9 min-h-0 overflow-hidden">
-        <EditorTabs workspaceId={workspaceId} />
+      <div className="col-span-9 flex min-h-0 flex-col gap-3">
+        <div className={`panel min-h-0 overflow-hidden ${isSqlFile ? 'flex-[2]' : 'flex-1'}`}>
+          <EditorTabs workspaceId={workspaceId} />
+        </div>
+        {isSqlFile && (
+          <div className="panel min-h-0 flex-1 overflow-hidden">
+            <QueryRunner workspaceId={workspaceId} sql={activeTab?.content ?? ''} />
+          </div>
+        )}
       </div>
 
       {overlay === 'quickOpen' && <QuickOpen workspaceId={workspaceId} onClose={() => setOverlay('none')} />}
