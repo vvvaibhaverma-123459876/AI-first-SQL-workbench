@@ -13,12 +13,24 @@ from collections.abc import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.pool import NullPool
 
 from app.core.config import get_settings
 
 settings = get_settings()
 
-control_plane_engine = create_async_engine(settings.control_plane_db_url, future=True)
+# NullPool, not the default pooled engine -- asyncpg connections are bound
+# to the event loop that created them. This engine is a module-level
+# singleton (created once at import time), but the test suite spins up a
+# fresh TestClient (and therefore a fresh event loop) per test module --
+# with connection pooling, a connection opened under one module's loop gets
+# handed to a later module's different loop and asyncpg raises "Future
+# attached to a different loop". NullPool opens a fresh physical connection
+# per checkout instead of reusing one across calls, which sidesteps this
+# entirely. Fine for this control plane's query volume; a real
+# high-throughput deployment would front Postgres with something like
+# PgBouncer rather than reintroduce in-process pooling here.
+control_plane_engine = create_async_engine(settings.control_plane_db_url, future=True, poolclass=NullPool)
 ControlPlaneSessionLocal = async_sessionmaker(control_plane_engine, expire_on_commit=False)
 
 

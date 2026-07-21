@@ -11,7 +11,18 @@ from alembic import context
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+# app.auth.models MUST import before any module that imports
+# fastapi_users_db_sqlalchemy.generics (i.e. before any other model module
+# below, all of which use GUID from there) -- fastapi-users-db-sqlalchemy
+# 7.0.0 has an import-order bug where touching the .generics submodule
+# before fastapi_users.db's own top-level import leaves
+# SQLAlchemyBaseUserTableUUID undefined there (its ImportError gets
+# silently swallowed by a bare `except ImportError` upstream). Keep this
+# import first, not alphabetized with the rest, or a future model module
+# that alphabetizes before "auth" (like ai_jobs did) reintroduces this.
 from app.auth.models import User  # noqa: E402,F401
+
+from app.ai_jobs.models import AiJob  # noqa: E402,F401
 from app.connections.models import DataConnection  # noqa: E402,F401
 from app.core.config import get_settings  # noqa: E402
 from app.db.control_plane import ControlPlaneBase  # noqa: E402

@@ -121,7 +121,7 @@ def test_repair_sql_rationale_is_positive_when_sql_actually_changes(mock_ai_serv
     in more than just a cosmetic trailing LIMIT (i.e. an actual repair
     happened), the positive rationale is still used — this must not regress
     into always claiming failure either."""
-    monkeypatch.setattr(mock_ai_service, "_generate", lambda _p: ("SELECT * FROM users LIMIT 10", None))
+    monkeypatch.setattr(mock_ai_service, "_generate", lambda _p, **_kw: ("SELECT * FROM users LIMIT 10", None))
     result = mock_ai_service.repair_sql("SELECT * FROM userz", "no such table: userz")
     assert "no automatic correction" not in result.rationale.lower()
 
@@ -158,7 +158,7 @@ def test_execute_sql_api_error_response_has_no_raw_sql_dump_or_internal_urls():
 # ── Finding 4: provider fallback must be visible, not silent ──────────────
 
 def test_generate_sql_reports_fallback_when_provider_fails(mock_ai_service, monkeypatch):
-    monkeypatch.setattr(mock_ai_service.provider, "generate", lambda _p: (_ for _ in ()).throw(ConnectionError("no local Ollama runtime reachable")))
+    monkeypatch.setattr(mock_ai_service.provider, "generate", lambda _p, **_kw: (_ for _ in ()).throw(ConnectionError("no local Ollama runtime reachable")))
     sql, fallback_reason = mock_ai_service.generate_sql("count of users per country")
     assert sql.strip()
     assert fallback_reason, "a provider failure must be reported back to the caller, not swallowed silently"
@@ -166,19 +166,19 @@ def test_generate_sql_reports_fallback_when_provider_fails(mock_ai_service, monk
 
 
 def test_explain_sql_reports_fallback_when_provider_fails(mock_ai_service, monkeypatch):
-    monkeypatch.setattr(mock_ai_service.provider, "generate", lambda _p: (_ for _ in ()).throw(ConnectionError("boom")))
+    monkeypatch.setattr(mock_ai_service.provider, "generate", lambda _p, **_kw: (_ for _ in ()).throw(ConnectionError("boom")))
     result = mock_ai_service.explain_sql("SELECT 1")
     assert result.provider_fallback, "ExplainSQLResponse must surface that a fallback occurred"
 
 
 def test_repair_sql_reports_fallback_when_provider_fails(mock_ai_service, monkeypatch):
-    monkeypatch.setattr(mock_ai_service.provider, "generate", lambda _p: (_ for _ in ()).throw(ConnectionError("boom")))
+    monkeypatch.setattr(mock_ai_service.provider, "generate", lambda _p, **_kw: (_ for _ in ()).throw(ConnectionError("boom")))
     result = mock_ai_service.repair_sql("SELECT * FROM users", "err")
     assert result.provider_fallback
 
 
 def test_suggest_tables_reports_fallback_when_provider_fails(mock_ai_service, monkeypatch):
-    monkeypatch.setattr(mock_ai_service.provider, "generate", lambda _p: (_ for _ in ()).throw(ConnectionError("boom")))
+    monkeypatch.setattr(mock_ai_service.provider, "generate", lambda _p, **_kw: (_ for _ in ()).throw(ConnectionError("boom")))
     result = mock_ai_service.suggest_tables("top users by spend")
     assert result.provider_fallback
 
