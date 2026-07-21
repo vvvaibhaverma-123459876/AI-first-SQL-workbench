@@ -16,6 +16,7 @@ from app.core.config import BACKEND_ROOT, PROJECT_ROOT, get_settings
 from app.db.control_plane import init_control_plane_db
 from app.db.init_metadata import init_metadata_db
 from app.db.seed_demo_data import build
+from app.ai_jobs.routes import router as ai_jobs_router
 from app.connections.routes import router as connections_router
 from app.files.routes import router as files_router
 from app.workspaces.routes import router as workspaces_router
@@ -55,6 +56,7 @@ app.include_router(fastapi_users.get_users_router(UserRead, UserUpdate), prefix=
 app.include_router(workspaces_router, prefix=settings.api_prefix)
 app.include_router(files_router, prefix=settings.api_prefix)
 app.include_router(connections_router, prefix=settings.api_prefix)
+app.include_router(ai_jobs_router, prefix=settings.api_prefix)
 
 # Backward compatibility for older frontend/tests/scripts that still call root endpoints.
 app.include_router(router)

@@ -56,8 +56,27 @@ class Settings(BaseSettings):
     # docker-compose.yml. The production Dockerfile sets AI_MODE=mock.
     ai_mode: str | None = Field(default=None, alias="AI_MODE")
     ollama_base_url: str = Field(default="http://localhost:11434", alias="OLLAMA_BASE_URL")
-    ollama_model: str = Field(default="qwen2.5-coder:7b", alias="OLLAMA_MODEL")
+    # mistral:7b, not qwen2.5-coder:7b (which was never actually verified) --
+    # empirically checked against this project's own 16GB dev machine
+    # (task #22): qwen3:8b's "thinking" mode swap-thrashed the machine
+    # (89-100s+ for the simplest query, then stalled entirely past 180s),
+    # and llama3:latest -- faster -- produced genuinely invalid SQL on a
+    # complex multi-join question. mistral was slower than llama3 but never
+    # produced invalid SQL in that check, so it's the safer single default.
+    ollama_model: str = Field(default="mistral:7b", alias="OLLAMA_MODEL")
+    # Per-task overrides, all optional -- unset falls back to ollama_model.
+    # Deliberately off by default: this project's own hardware check found
+    # one 8B model already leans on swap, so alternating models per task
+    # would mean multiple ~5GB models resident (or reloaded, paying Ollama's
+    # keep-alive eviction cost) during a single multi-step run. Available
+    # for anyone on beefier hardware who wants e.g. repair routed to
+    # llama3:latest, which measured faster AND more accurate at repair than
+    # mistral in the same check.
+    ollama_generate_model: str | None = Field(default=None, alias="OLLAMA_GENERATE_MODEL")
     ollama_explain_model: str | None = Field(default=None, alias="OLLAMA_EXPLAIN_MODEL")
+    ollama_repair_model: str | None = Field(default=None, alias="OLLAMA_REPAIR_MODEL")
+    ollama_suggest_model: str | None = Field(default=None, alias="OLLAMA_SUGGEST_MODEL")
+    ollama_investigate_model: str | None = Field(default=None, alias="OLLAMA_INVESTIGATE_MODEL")
     hf_model: str = Field(default="google/flan-t5-base", alias="HF_MODEL")
 
     default_row_limit: int = Field(default=200, alias="DEFAULT_ROW_LIMIT")
@@ -81,6 +100,12 @@ class Settings(BaseSettings):
     def effective_ai_mode(self) -> str:
         """The mode that actually decides which LLM provider gets used."""
         return (self.ai_mode or self.ai_provider).lower()
+
+    def model_for_task(self, task: str) -> str:
+        """task is one of generate|explain|repair|suggest|investigate.
+        Falls back to ollama_model when no task-specific override is set."""
+        override = getattr(self, f"ollama_{task}_model", None)
+        return override or self.ollama_model
 
 
 @lru_cache

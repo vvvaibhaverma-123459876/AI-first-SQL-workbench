@@ -17,7 +17,7 @@ from app.core.config import get_settings
 class BaseLLMProvider:
     provider_name = "base"
 
-    def generate(self, prompt: str) -> str:
+    def generate(self, prompt: str, model: str | None = None) -> str:
         raise NotImplementedError
 
     def status(self) -> dict[str, Any]:
@@ -35,7 +35,10 @@ class BaseLLMProvider:
 class MockProvider(BaseLLMProvider):
     provider_name = "mock"
 
-    def generate(self, prompt: str) -> str:
+    def generate(self, prompt: str, model: str | None = None) -> str:
+        # The mock provider has no real models to route between -- accepts
+        # the parameter only so it satisfies the same interface as the real
+        # providers and callers don't need to special-case it.
         prompt_l = prompt.lower()
         if "explain the query result" in prompt_l or "result summary" in prompt_l:
             return "The result set has been generated successfully. Review the row counts, groupings, and totals before making a business decision."
@@ -150,10 +153,10 @@ class OllamaProvider(BaseLLMProvider):
         self.base_url = settings.ollama_base_url.rstrip("/")
         self.model = settings.ollama_model
 
-    def generate(self, prompt: str) -> str:
+    def generate(self, prompt: str, model: str | None = None) -> str:
         response = requests.post(
             f"{self.base_url}/api/generate",
-            json={"model": self.model, "prompt": prompt, "stream": False},
+            json={"model": model or self.model, "prompt": prompt, "stream": False},
             timeout=120,
         )
         response.raise_for_status()
@@ -203,7 +206,9 @@ class HuggingFaceProvider(BaseLLMProvider):
             self._generator = pipeline("text2text-generation", model=self.settings.hf_model)
         return self._generator
 
-    def generate(self, prompt: str) -> str:
+    def generate(self, prompt: str, model: str | None = None) -> str:
+        # Single fixed pipeline model (self.settings.hf_model) -- no
+        # per-task routing support in this provider, unlike Ollama.
         output = self.generator(prompt, max_new_tokens=512, do_sample=False)
         return output[0]["generated_text"].strip()
 

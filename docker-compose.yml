@@ -44,7 +44,13 @@ services:
     environment:
       AI_MODE: ollama
       OLLAMA_BASE_URL: http://ollama:11434
-      OLLAMA_MODEL: qwen2.5-coder:7b
+      # mistral:7b, not qwen2.5-coder:7b -- empirically verified (task #22)
+      # to be the more reliable single default: qwen3's "thinking" mode
+      # swap-thrashed a 16GB dev machine (89-100s+ for the simplest query,
+      # then stalled entirely), and llama3:latest -- faster -- produced
+      # genuinely invalid SQL on a complex multi-join question. mistral was
+      # slower than llama3 but never produced invalid SQL in that check.
+      OLLAMA_MODEL: mistral:7b
       CONTROL_PLANE_DB_URL: postgresql+asyncpg://sqlstudio:sqlstudio@postgres:5432/sqlstudio
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET: insecure-dev-secret-change-me
@@ -60,6 +66,27 @@ services:
     # Real Postgres migrations before serving traffic — the same alembic
     # history that backend/alembic/versions/ tracks, not just create_all.
     command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    working_dir: /app/backend
+
+  worker:
+    build: .
+    environment:
+      AI_MODE: ollama
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: mistral:7b
+      CONTROL_PLANE_DB_URL: postgresql+asyncpg://sqlstudio:sqlstudio@postgres:5432/sqlstudio
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: insecure-dev-secret-change-me
+    volumes:
+      - ./backend/data:/app/backend/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    command: python -m app.worker
     working_dir: /app/backend
 
 volumes:
