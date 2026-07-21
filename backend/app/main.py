@@ -9,9 +9,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api.routes import router
+# app.auth.backend (and transitively app.auth.models) MUST import before
+# app.api.routes -- fastapi-users-db-sqlalchemy 7.0.0 has an import-order bug
+# where touching fastapi_users_db_sqlalchemy.generics (which every model
+# module's GUID column type does) before fastapi_users.db's own top-level
+# import leaves SQLAlchemyBaseUserTableUUID undefined there (its ImportError
+# gets silently swallowed by a bare `except ImportError` upstream). This bit
+# app.api.routes specifically once app.assistant.orchestrator started
+# importing app.connections.models (Phase 3c, connection-aware AI) ahead of
+# auth's own import -- same root cause already documented in alembic/env.py
+# and app/worker.py, now also live here. Keep this import first.
 from app.auth.backend import auth_backend, fastapi_users
 from app.auth.schemas import UserCreate, UserRead, UserUpdate
+
+from app.api.routes import router
 from app.core.config import BACKEND_ROOT, PROJECT_ROOT, get_settings
 from app.db.control_plane import init_control_plane_db
 from app.db.init_metadata import init_metadata_db
