@@ -1,13 +1,67 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: sqlstudio
+      POSTGRES_PASSWORD: sqlstudio
+      POSTGRES_DB: sqlstudio
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      # Host-side 5434 to avoid colliding with any other local Postgres —
+      # containers still talk to each other over the compose network at the
+      # standard internal 5432, see CONTROL_PLANE_DB_URL below.
+      - "5434:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sqlstudio"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      # Host-side 6381 to avoid colliding with any other local Redis —
+      # same reasoning as postgres's 5434 mapping above.
+      - "6381:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+
   app:
     build: .
     ports:
       - "8000:8000"
     environment:
-      AI_PROVIDER: ollama
-      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      AI_MODE: ollama
+      OLLAMA_BASE_URL: http://ollama:11434
       OLLAMA_MODEL: qwen2.5-coder:7b
+      CONTROL_PLANE_DB_URL: postgresql+asyncpg://sqlstudio:sqlstudio@postgres:5432/sqlstudio
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: insecure-dev-secret-change-me
     volumes:
       - ./backend/data:/app/backend/data
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    # Real Postgres migrations before serving traffic — the same alembic
+    # history that backend/alembic/versions/ tracks, not just create_all.
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    working_dir: /app/backend
+
+volumes:
+  pgdata:
+  ollama_models:

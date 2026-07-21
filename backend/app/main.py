@@ -10,9 +10,13 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import router
+from app.auth.backend import auth_backend, fastapi_users
+from app.auth.schemas import UserCreate, UserRead, UserUpdate
 from app.core.config import BACKEND_ROOT, PROJECT_ROOT, get_settings
+from app.db.control_plane import init_control_plane_db
 from app.db.init_metadata import init_metadata_db
 from app.db.seed_demo_data import build
+from app.workspaces.routes import router as workspaces_router
 
 settings = get_settings()
 
@@ -25,6 +29,10 @@ async def lifespan(_: FastAPI):
     if not analytics_db.exists() or not metadata_db.exists():
         build()
     init_metadata_db()
+    # create_all is checkfirst/idempotent — safe against both a fresh SQLite
+    # dev file and a fresh Postgres instance. Alembic (backend/alembic/)
+    # covers real migrations as the schema evolves across phases.
+    await init_control_plane_db()
     yield
 
 
@@ -39,6 +47,10 @@ app.add_middleware(
 
 # New product API namespace.
 app.include_router(router, prefix=settings.api_prefix)
+app.include_router(fastapi_users.get_auth_router(auth_backend), prefix=f"{settings.api_prefix}/auth/jwt", tags=["auth"])
+app.include_router(fastapi_users.get_register_router(UserRead, UserCreate), prefix=f"{settings.api_prefix}/auth", tags=["auth"])
+app.include_router(fastapi_users.get_users_router(UserRead, UserUpdate), prefix=f"{settings.api_prefix}/users", tags=["users"])
+app.include_router(workspaces_router, prefix=settings.api_prefix)
 
 # Backward compatibility for older frontend/tests/scripts that still call root endpoints.
 app.include_router(router)
