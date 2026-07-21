@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { LogOut, FolderOpen } from 'lucide-react'
+import { LogOut } from 'lucide-react'
 import { useAuthStore } from '../../store/useAuthStore'
 import { LegacyDemoWorkbench } from '../LegacyDemoWorkbench'
+import { IdeShell } from '../ide/IdeShell'
 
 export function WorkspaceShell() {
   const { user, workspaces, activeWorkspaceId, setActiveWorkspace, logout } = useAuthStore()
@@ -12,11 +13,13 @@ export function WorkspaceShell() {
     return <LegacyDemoWorkbench onExit={() => setShowLegacy(false)} />
   }
 
+  if (!workspace) return null
+
   return (
     <div className="flex h-screen flex-col bg-slate-950 text-slate-100">
       <div className="flex items-center justify-between border-b border-slate-800 px-5 py-3">
         <div className="flex items-center gap-3">
-          <span className="text-sm font-semibold">{workspace?.name ?? 'Workspace'}</span>
+          <span className="text-sm font-semibold">{workspace.name}</span>
           {workspaces.length > 1 && (
             <select
               className="!py-1 !text-xs"
@@ -30,6 +33,7 @@ export function WorkspaceShell() {
           )}
         </div>
         <div className="flex items-center gap-3 text-xs text-slate-400">
+          <button className="!text-xs" onClick={() => setShowLegacy(true)}>Legacy demo workbench</button>
           <span>{user?.email}</span>
           <button className="!border-0 !bg-transparent text-slate-500 hover:text-slate-200" onClick={logout} title="Sign out">
             <LogOut size={15} />
@@ -37,20 +41,8 @@ export function WorkspaceShell() {
         </div>
       </div>
 
-      <div className="flex flex-1 items-center justify-center p-8">
-        <div className="panel max-w-lg p-8 text-center">
-          <FolderOpen size={28} className="mx-auto mb-4 text-slate-600" />
-          <div className="mb-2 text-lg font-semibold text-slate-100">Nothing here yet</div>
-          <p className="muted mb-6 text-sm leading-relaxed">
-            This workspace is real and persisted, but the file tree, editor, and data connections
-            that will actually live here are still being built (Phase 1: files &amp; search, Phase 2: connect
-            a real database). For now, you can still use the original single-user demo workbench against
-            the bundled sample database.
-          </p>
-          <button className="!border-blue-800 !bg-blue-700 hover:!bg-blue-600" onClick={() => setShowLegacy(true)}>
-            Open legacy demo workbench
-          </button>
-        </div>
+      <div className="min-h-0 flex-1">
+        <IdeShell workspaceId={workspace.id} onOpenLegacy={() => setShowLegacy(true)} />
       </div>
     </div>
   )
