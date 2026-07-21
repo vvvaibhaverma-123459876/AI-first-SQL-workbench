@@ -22,6 +22,15 @@ async def _require_viewer(session: AsyncSession, workspace_id: uuid.UUID, user_i
         raise HTTPException(status_code=404, detail="Workspace not found") from exc
 
 
+async def _require_editor(session: AsyncSession, workspace_id: uuid.UUID, user_id: uuid.UUID) -> None:
+    try:
+        await workspace_service.require_role(session, workspace_id=workspace_id, user_id=user_id, min_role="editor")
+    except workspace_service.NotAMemberError as exc:
+        raise HTTPException(status_code=404, detail="Workspace not found") from exc
+    except workspace_service.InsufficientRoleError as exc:
+        raise HTTPException(status_code=403, detail="Editor or owner role required") from exc
+
+
 @router.post("", response_model=AiJobRead)
 async def create_job(
     workspace_id: uuid.UUID,
@@ -29,11 +38,16 @@ async def create_job(
     user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_control_plane_session),
 ) -> AiJobRead:
-    # Viewer, not editor+: these AI calls only produce suggestions/text --
-    # generate_sql/suggest_tables don't touch a file or run against a real
-    # connection here, and explain/repair operate on SQL text the caller
-    # already has. Mirrors "viewer can read" from files/connections.
-    await _require_viewer(session, workspace_id, user.id)
+    # generate/explain/repair/suggest only produce suggestions/text -- they
+    # don't touch a file or a real connection, so viewer is enough there
+    # (mirrors "viewer can read" from files/connections). investigate is
+    # different: it writes a new file into the workspace's tree, so it needs
+    # the same editor+ bar as files.routes.create_file, or a viewer could
+    # use it to write files despite having no write access anywhere else.
+    if payload.task_type == "investigate":
+        await _require_editor(session, workspace_id, user.id)
+    else:
+        await _require_viewer(session, workspace_id, user.id)
     try:
         job = await service.create_job(
             session, workspace_id=workspace_id, created_by=user.id, task_type=payload.task_type, input=payload.input

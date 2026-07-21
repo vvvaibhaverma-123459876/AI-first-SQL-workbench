@@ -5,13 +5,14 @@ import { QuickOpen } from './QuickOpen'
 import { ContentSearch } from './ContentSearch'
 import { ConnectionsPanel } from './ConnectionsPanel'
 import { QueryRunner } from './QueryRunner'
+import { InvestigatePanel } from './InvestigatePanel'
 import { CommandPalette, type Command } from './CommandPalette'
 import { useFileStore } from '../../store/useFileStore'
 
 export function IdeShell({ workspaceId, onOpenLegacy }: { workspaceId: string; onOpenLegacy: () => void }) {
   const { loadFiles, createFile, activeTabId, openTabs, saveNow } = useFileStore()
   const [overlay, setOverlay] = useState<'none' | 'quickOpen' | 'search' | 'palette'>('none')
-  const [sidebarTab, setSidebarTab] = useState<'files' | 'connections'>('files')
+  const [sidebarTab, setSidebarTab] = useState<'files' | 'connections' | 'investigate'>('files')
   const activeTab = openTabs.find((t) => t.fileId === activeTabId)
   const isSqlFile = activeTab?.name.endsWith('.sql') ?? false
 
@@ -66,9 +67,17 @@ export function IdeShell({ workspaceId, onOpenLegacy }: { workspaceId: string; o
           >
             Connections
           </button>
+          <button
+            className={`flex-1 !rounded-none !border-0 !border-b-2 !bg-transparent py-1.5 text-xs ${sidebarTab === 'investigate' ? '!border-b-blue-500 text-slate-100' : '!border-b-transparent text-slate-400'}`}
+            onClick={() => setSidebarTab('investigate')}
+          >
+            Investigate
+          </button>
         </div>
         <div className="min-h-0 flex-1 overflow-hidden">
-          {sidebarTab === 'files' ? <FileTree workspaceId={workspaceId} /> : <ConnectionsPanel workspaceId={workspaceId} />}
+          {sidebarTab === 'files' && <FileTree workspaceId={workspaceId} />}
+          {sidebarTab === 'connections' && <ConnectionsPanel workspaceId={workspaceId} />}
+          {sidebarTab === 'investigate' && <InvestigatePanel workspaceId={workspaceId} />}
         </div>
       </div>
       <div className="col-span-9 flex min-h-0 flex-col gap-3">
