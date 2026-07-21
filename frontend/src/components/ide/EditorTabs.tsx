@@ -45,7 +45,7 @@ export function EditorTabs({ workspaceId }: { workspaceId: string }) {
               className="rounded p-0.5 hover:bg-slate-700"
               onClick={(e) => {
                 e.stopPropagation()
-                closeTab(tab.fileId)
+                closeTab(workspaceId, tab.fileId)
               }}
             >
               <X size={11} />

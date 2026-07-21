@@ -23,7 +23,7 @@ type FileState = {
 
   loadFiles: (workspaceId: string) => Promise<void>
   openFile: (workspaceId: string, fileId: string) => Promise<void>
-  closeTab: (fileId: string) => void
+  closeTab: (workspaceId: string, fileId: string, opts?: { flush?: boolean }) => Promise<void>
   setActiveTab: (fileId: string) => void
   updateContent: (workspaceId: string, fileId: string, content: string) => void
   saveNow: (workspaceId: string, fileId: string) => Promise<void>
@@ -69,9 +69,16 @@ export const useFileStore = create<FileState>((set, get) => ({
     }))
   },
 
-  closeTab: (fileId) => {
+  closeTab: async (workspaceId, fileId, opts = {}) => {
     const timer = saveTimers.get(fileId)
     if (timer) clearTimeout(timer)
+    // A pending debounced save is still in flight (or hasn't fired yet) when
+    // a tab closes within the ~800ms autosave window -- flush it first, or
+    // the edit since the last save is silently gone with no trace. Skipped
+    // only when the file itself is being deleted (nothing left to save to).
+    if (opts.flush !== false) {
+      await get().saveNow(workspaceId, fileId)
+    }
     set((state) => {
       const openTabs = state.openTabs.filter((t) => t.fileId !== fileId)
       const activeTabId = state.activeTabId === fileId ? (openTabs[openTabs.length - 1]?.fileId ?? null) : state.activeTabId
@@ -130,7 +137,9 @@ export const useFileStore = create<FileState>((set, get) => ({
 
   deleteFile: async (workspaceId, fileId) => {
     await api.delete(`/workspaces/${workspaceId}/files/${fileId}`, { headers: authHeaders() })
-    get().closeTab(fileId)
+    // flush: false -- the file is already gone server-side, so there is
+    // nothing left to save the pending edit to (and doing so would just 404).
+    await get().closeTab(workspaceId, fileId, { flush: false })
     await get().loadFiles(workspaceId)
   },
 
