@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { FileText, Search } from 'lucide-react'
 import { useAiJobsStore } from '../../store/useAiJobsStore'
+import { useConnectionStore } from '../../store/useConnectionStore'
 import { useFileStore } from '../../store/useFileStore'
 
 const STATUS_COLOR: Record<string, string> = {
@@ -19,12 +20,22 @@ function plainText(markdown: string): string {
 
 export function InvestigatePanel({ workspaceId }: { workspaceId: string }) {
   const [question, setQuestion] = useState('')
+  const [connectionId, setConnectionId] = useState('')
   const { activeJob, investigating, error, startInvestigation } = useAiJobsStore()
+  const { connections, loadConnections } = useConnectionStore()
   const { loadFiles, openFile } = useFileStore()
 
+  useEffect(() => {
+    loadConnections(workspaceId)
+  }, [workspaceId, loadConnections])
+
+  useEffect(() => {
+    if (!connectionId && connections.length > 0) setConnectionId(connections[0].id)
+  }, [connections, connectionId])
+
   const submit = () => {
-    if (!question.trim() || investigating) return
-    startInvestigation(workspaceId, question.trim())
+    if (!question.trim() || !connectionId || investigating) return
+    startInvestigation(workspaceId, question.trim(), connectionId)
   }
 
   const openReport = async () => {
@@ -41,8 +52,23 @@ export function InvestigatePanel({ workspaceId }: { workspaceId: string }) {
           <Search size={15} /> Investigate
         </div>
         <div className="muted mb-2 text-xs">
-          Ask an open-ended question. Runs the primary query, an automatic follow-up, and writes a report file into this workspace.
+          Ask an open-ended question about one of your connections. Runs the primary query, an automatic follow-up, and writes a report file into this workspace.
         </div>
+
+        {connections.length === 0 ? (
+          <div className="rounded-lg border border-amber-900/50 bg-amber-950/20 px-2 py-1.5 text-xs text-amber-300">
+            No connections yet. Add one in the Connections tab to investigate its data.
+          </div>
+        ) : (
+          <select className="mb-2 w-full !py-1 !text-xs" value={connectionId} onChange={(e) => setConnectionId(e.target.value)}>
+            {connections.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        )}
+
         <textarea
           className="w-full resize-none rounded-lg border border-slate-800 bg-slate-900/60 p-2 text-xs text-slate-200"
           rows={3}
@@ -54,7 +80,7 @@ export function InvestigatePanel({ workspaceId }: { workspaceId: string }) {
         <button
           className="mt-2 flex w-full items-center justify-center gap-1 !border-blue-800 !bg-blue-700 !py-1.5 !text-xs hover:!bg-blue-600"
           onClick={submit}
-          disabled={!question.trim() || investigating}
+          disabled={!question.trim() || !connectionId || investigating}
         >
           {investigating ? 'Investigating…' : 'Run Investigation'}
         </button>

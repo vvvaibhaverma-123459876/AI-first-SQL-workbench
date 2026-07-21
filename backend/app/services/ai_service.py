@@ -5,13 +5,29 @@ import json
 import logging
 import re
 
-from app.api.schemas import ExplainSQLResponse, RepairSQLResponse, SQLExecutionResponse, SuggestTablesResponse, TableSuggestion
+from app.api.schemas import ExplainSQLResponse, RepairSQLResponse, SchemaResponse, SQLExecutionResponse, SuggestTablesResponse, TableSuggestion
 from app.core.config import get_settings
 from app.llm.providers import MockProvider, get_provider
 from app.services.schema_service import SchemaService
 from app.utils.schema_text import schema_to_prompt_text
 
 logger = logging.getLogger(__name__)
+
+# Every generate_sql/repair_sql caller used to implicitly target the bundled
+# demo database, which is SQLite -- so the prompt hardcoded "SQLite" and
+# nobody noticed. Once a caller can pass a real connection's schema (Phase
+# 3c, connection-aware AI), the dialect must travel with it: generating
+# correct table names in the wrong dialect (e.g. SQLite's strftime() against
+# a Postgres connection) still fails at execution. Keys match
+# app.connections.drivers.SQLGLOT_DIALECT_BY_TYPE / DataConnection.connector_type.
+SQL_DIALECT_LABEL = {
+    "postgres": "PostgreSQL",
+    "mysql": "MySQL",
+    "sqlite": "SQLite",
+    "snowflake": "Snowflake SQL",
+    "bigquery": "BigQuery Standard SQL",
+    "databricks": "Databricks SQL (Spark SQL)",
+}
 
 
 class AIService:
@@ -41,22 +57,22 @@ class AIService:
             logger.warning("AI provider fallback: %s", reason)
             return self.fallback.generate(f"{prompt_text}\n\nProvider failure fallback reason: {exc}"), reason
 
-    def _schema_text(self) -> str:
-        return schema_to_prompt_text(self.schema_service.get_schema())
+    def _schema_text(self, schema: SchemaResponse | None = None) -> str:
+        return schema_to_prompt_text(schema or self.schema_service.get_schema())
 
-    def generate_sql(self, prompt: str) -> tuple[str, str | None]:
+    def generate_sql(self, prompt: str, schema: SchemaResponse | None = None, dialect: str = "SQLite") -> tuple[str, str | None]:
         prompt_text = f"""
-You are an expert SQLite analyst working inside a local-only SQL workbench.
+You are an expert {dialect} analyst working inside a local-only SQL workbench.
 Use only the schema below. Never invent tables or columns.
 Return SQL only, no markdown, no commentary.
 Rules:
 - Use read-only SELECT/WITH SQL only.
 - Prefer explicit joins.
 - Include a LIMIT unless the user asks for an aggregate-only single-row answer.
-- Use SQLite-compatible syntax.
+- Use {dialect}-compatible syntax.
 
 Schema:
-{self._schema_text()}
+{self._schema_text(schema)}
 
 Business question: {prompt}
 """
@@ -97,14 +113,14 @@ Sample rows JSON:
         text, fallback_reason = self._generate(prompt_text, task="explain")
         return text.strip(), fallback_reason
 
-    def repair_sql(self, sql: str, error_message: str = "") -> RepairSQLResponse:
+    def repair_sql(self, sql: str, error_message: str = "", schema: SchemaResponse | None = None, dialect: str = "SQLite") -> RepairSQLResponse:
         prompt_text = f"""
-Repair the following SQLite query.
+Repair the following {dialect} query.
 Return SQL only.
 Use only the schema below and keep the query read-only.
 
 Schema:
-{self._schema_text()}
+{self._schema_text(schema)}
 
 Error: {error_message}
 SQL:
@@ -120,8 +136,8 @@ SQL:
             rationale = "Generated a safer or syntactically corrected read-only SQL statement."
         return RepairSQLResponse(repaired_sql=repaired, rationale=rationale, provider_fallback=fallback_reason)
 
-    def suggest_tables(self, prompt: str) -> SuggestTablesResponse:
-        schema = self.schema_service.get_schema()
+    def suggest_tables(self, prompt: str, schema: SchemaResponse | None = None) -> SuggestTablesResponse:
+        schema = schema or self.schema_service.get_schema()
         prompt_text = f"""
 Suggest relevant tables for this analyst request.
 Respond as JSON with keys suggestions and join_suggestions.

@@ -19,7 +19,7 @@ type AiJobsState = {
   activeJob: AiJob | null
   investigating: boolean
   error: string | null
-  startInvestigation: (workspaceId: string, question: string) => Promise<void>
+  startInvestigation: (workspaceId: string, question: string, connectionId: string) => Promise<void>
   reset: () => void
 }
 
@@ -33,7 +33,7 @@ export const useAiJobsStore = create<AiJobsState>((set) => ({
   investigating: false,
   error: null,
 
-  startInvestigation: async (workspaceId, question) => {
+  startInvestigation: async (workspaceId, question, connectionId) => {
     if (pollTimer) clearTimeout(pollTimer)
     set({ investigating: true, error: null, activeJob: null })
 
@@ -41,13 +41,14 @@ export const useAiJobsStore = create<AiJobsState>((set) => ({
     try {
       const { data } = await api.post<AiJob>(
         `/workspaces/${workspaceId}/ai/jobs`,
-        { task_type: 'investigate', input: { question } },
+        { task_type: 'investigate', input: { question, connection_id: connectionId } },
         { headers: authHeaders() },
       )
       jobId = data.id
       set({ activeJob: data })
-    } catch {
-      set({ investigating: false, error: 'Could not start the investigation.' })
+    } catch (err) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      set({ investigating: false, error: detail || 'Could not start the investigation.' })
       return
     }
 
