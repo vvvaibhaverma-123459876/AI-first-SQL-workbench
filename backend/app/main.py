@@ -40,6 +40,7 @@ from app.connections.embedding_models import SchemaEmbedding  # noqa: F401
 from app.connections.routes import router as connections_router
 from app.dashboards.routes import router as dashboards_router
 from app.files.routes import router as files_router
+from app.scheduled_queries.routes import router as scheduled_queries_router
 from app.workspaces.routes import router as workspaces_router
 
 settings = get_settings()
@@ -79,6 +80,7 @@ app.include_router(files_router, prefix=settings.api_prefix)
 app.include_router(connections_router, prefix=settings.api_prefix)
 app.include_router(ai_jobs_router, prefix=settings.api_prefix)
 app.include_router(dashboards_router, prefix=settings.api_prefix)
+app.include_router(scheduled_queries_router, prefix=settings.api_prefix)
 
 # Backward compatibility for older frontend/tests/scripts that still call root endpoints.
 app.include_router(router)

@@ -47,3 +47,8 @@ redis==8.0.1
 # when a real connection is attached). Needs the pgvector Postgres
 # extension too -- see docker-compose.yml's postgres image.
 pgvector==0.5.0
+
+# v2 Phase 4b: scheduled queries. Pure cron-expression math only -- the
+# actual periodic enqueue loop is app/scheduler.py, a standalone process
+# (see its own docstring for why it's not a thread inside app/worker.py).
+croniter==6.2.4

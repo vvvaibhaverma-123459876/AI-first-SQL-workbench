@@ -139,6 +139,24 @@ jobs:
           done
           echo "::error::AI worker never came up for e2e"; cat /tmp/worker-e2e.log; exit 1
 
+      - name: Start scheduler for e2e smoke test
+        working-directory: backend
+        env:
+          CONTROL_PLANE_DB_URL: postgresql+asyncpg://sqlstudio:sqlstudio@localhost:5432/sqlstudio
+          REDIS_URL: redis://localhost:6379/0
+          JWT_SECRET: insecure-dev-secret-change-me
+        run: |
+          # Boot-check only, same posture as the AI worker step above --
+          # Phase 4b's actual "fires and notifies" correctness is proven at
+          # the pytest level (tick()/webhook tests) against real Redis and
+          # a real local HTTP listener, not by waiting on a live cron here.
+          nohup python -m app.scheduler > /tmp/scheduler-e2e.log 2>&1 &
+          for i in $(seq 1 30); do
+            grep -q "Scheduler tick loop starting" /tmp/scheduler-e2e.log && exit 0
+            sleep 1
+          done
+          echo "::error::Scheduler never came up for e2e"; cat /tmp/scheduler-e2e.log; exit 1
+
       - name: Start frontend dev server for e2e smoke test
         working-directory: frontend
         run: |

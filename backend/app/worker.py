@@ -22,10 +22,16 @@ from app.auth.models import User  # noqa: E402,F401
 from app.ai_jobs.models import AiJob  # noqa: E402,F401
 from app.connections.embedding_models import SchemaEmbedding  # noqa: E402,F401
 from app.connections.models import DataConnection  # noqa: E402,F401
+from app.dashboards.models import Dashboard, DashboardItem  # noqa: E402,F401
 from app.files.models import File, FileRevision  # noqa: E402,F401
+from app.scheduled_queries.models import ScheduledQuery  # noqa: E402,F401
 from app.workspaces.models import AuditLogEntry, Workspace, WorkspaceMembership  # noqa: E402,F401
 
 from app.ai_jobs.queue import ai_queue, redis_conn  # noqa: E402
+from app.scheduled_queries.queue import scheduled_queries_queue  # noqa: E402
 
 if __name__ == "__main__":
-    Worker([ai_queue], connection=redis_conn).work()
+    # "ai_tasks" listed first so CI's log-grep for "Listening on ai_tasks"
+    # (see ci-and-deploy.yml's "Start AI worker for e2e smoke test" step)
+    # still matches as a substring regardless of what RQ appends after it.
+    Worker([ai_queue, scheduled_queries_queue], connection=redis_conn).work()

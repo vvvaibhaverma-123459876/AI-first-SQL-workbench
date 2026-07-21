@@ -95,6 +95,26 @@ services:
     command: python -m app.worker
     working_dir: /app/backend
 
+  scheduler:
+    # Phase 4b: enqueues due scheduled queries onto the worker's
+    # scheduled_queries queue every 30s. Deliberately its own process, not
+    # a thread inside the worker service above -- see app/scheduler.py's
+    # own docstring for why (fork-safety: a persistent thread doing DB
+    # queries + Redis enqueues could hold library locks across the
+    # worker's fork() for an unrelated job).
+    build: .
+    environment:
+      CONTROL_PLANE_DB_URL: postgresql+asyncpg://sqlstudio:sqlstudio@postgres:5432/sqlstudio
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: insecure-dev-secret-change-me
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: python -m app.scheduler
+    working_dir: /app/backend
+
 volumes:
   pgdata:
   ollama_models:
