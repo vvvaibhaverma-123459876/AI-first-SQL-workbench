@@ -87,16 +87,14 @@ def build_engine(config: ConnectionConfig) -> Engine:
         except ImportError as exc:
             raise ConnectorNotInstalledError("sqlalchemy-bigquery") from exc
         import json
-        import tempfile
 
-        # sqlalchemy-bigquery's URL form takes a path to a credentials file,
-        # not the JSON content inline -- write it once per engine build.
-        creds_file = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
-        creds_file.write(config.service_account_json)
-        creds_file.close()
+        # credentials_info takes the parsed key dict directly -- passing it
+        # this way (vs. credentials_path) means the service-account key is
+        # never written to disk, where it would otherwise accumulate as a
+        # new plaintext-credential file on every single test/schema/query call.
         dataset_part = f"/{config.dataset}" if config.dataset else ""
-        url = f"bigquery://{config.project_id}{dataset_part}?credentials_path={quote_plus(creds_file.name)}"
-        return create_engine(url)
+        url = f"bigquery://{config.project_id}{dataset_part}"
+        return create_engine(url, credentials_info=json.loads(config.service_account_json))
 
     if isinstance(config, DatabricksConfig):
         try:

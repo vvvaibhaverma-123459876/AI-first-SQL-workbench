@@ -114,8 +114,21 @@ jobs:
           done
           echo "::error::Frontend dev server never became healthy for e2e"; cat /tmp/frontend-e2e.log; exit 1
 
+      - name: Seed a SQLite fixture for the connections e2e test
+        run: |
+          python3 -c "
+          import sqlite3
+          conn = sqlite3.connect('${{ runner.temp }}/e2e-fixture.db')
+          conn.execute('CREATE TABLE widgets (id INTEGER PRIMARY KEY, label TEXT)')
+          conn.execute(\"INSERT INTO widgets (label) VALUES ('alpha'), ('beta')\")
+          conn.commit()
+          conn.close()
+          "
+
       - name: End-to-end IDE smoke test (Playwright)
         working-directory: frontend
+        env:
+          PLAYWRIGHT_SQLITE_FIXTURE: ${{ runner.temp }}/e2e-fixture.db
         run: npm run test:e2e
 
       - name: Upload Playwright report

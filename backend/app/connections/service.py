@@ -99,7 +99,16 @@ def is_read_only_sql(sql: str, *, connector_type: str) -> bool:
     may read but not write) may run this statement. Anything sqlglot can't
     parse is treated as NOT read-only -- fail closed, not open. This is a
     permission check, not a SQL validator: a statement that passes here can
-    still fail against the real database for any number of real reasons."""
+    still fail against the real database for any number of real reasons.
+
+    KNOWN GAP, not fixed here: this is a syntax-shape check, not a real
+    permission boundary. `WITH x AS (DELETE FROM t RETURNING *) SELECT * FROM x`
+    and `SELECT ... INTO new_table` both parse as a top-level Select and
+    would pass, letting a viewer write through a "read-only" statement on
+    Postgres. The robust fix is a transaction-level read-only mode (Postgres
+    `SET TRANSACTION READ ONLY`, SQLite `mode=ro`), not smarter parsing --
+    deliberately deferred, tracked alongside the SSRF gap in the PR
+    description, not silently assumed solved."""
     dialect = SQLGLOT_DIALECT_BY_TYPE.get(connector_type)
     try:
         statements = sqlglot.parse(sql, read=dialect)
@@ -132,6 +141,13 @@ def test_connection_sync(connection: DataConnection) -> TestConnectionResult:
         engine.dispose()
 
 
+# Schemas every one of these engines exposes that are never a user's own
+# data -- Postgres/MySQL system catalogs. Filtered out so "browse schema"
+# shows a workspace member's tables, not hundreds of catalog tables with
+# their one table buried somewhere in the middle.
+SYSTEM_SCHEMAS = {"pg_catalog", "information_schema", "pg_toast", "mysql", "performance_schema", "sys"}
+
+
 def get_schema_sync(connection: DataConnection) -> list[TableInfo]:
     config = _load_config(connection)
     engine = build_engine(config)
@@ -140,6 +156,8 @@ def get_schema_sync(connection: DataConnection) -> list[TableInfo]:
         tables: list[TableInfo] = []
         schema_names = inspector.get_schema_names() if hasattr(inspector, "get_schema_names") else [None]
         for schema_name in schema_names or [None]:
+            if schema_name in SYSTEM_SCHEMAS:
+                continue
             for table_name in inspector.get_table_names(schema=schema_name):
                 columns = inspector.get_columns(table_name, schema=schema_name)
                 tables.append(
@@ -160,8 +178,24 @@ def run_query_sync(connection: DataConnection, sql: str) -> QueryResponse:
     row_limit = get_settings().default_row_limit
     started = time.perf_counter()
     try:
-        with engine.connect() as conn:
+        # engine.begin(), not engine.connect() -- this commits on a clean
+        # exit. Without it, an editor's INSERT/UPDATE/DELETE looked like it
+        # succeeded (200 OK) but was silently rolled back the moment the
+        # connection closed at the end of the `with` block.
+        with engine.begin() as conn:
             result = conn.execute(text(sql))
+            if not result.returns_rows:
+                # A write statement has no row-oriented result to iterate --
+                # doing so raises ResourceClosedError, which the except
+                # clause below would otherwise turn into a confusing 400 for
+                # a write that actually succeeded.
+                return QueryResponse(
+                    columns=[],
+                    rows=[],
+                    row_count=result.rowcount if result.rowcount and result.rowcount > 0 else 0,
+                    truncated=False,
+                    execution_ms=int((time.perf_counter() - started) * 1000),
+                )
             columns = list(result.keys())
             rows = []
             truncated = False

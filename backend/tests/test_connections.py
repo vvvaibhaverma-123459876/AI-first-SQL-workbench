@@ -146,6 +146,46 @@ def test_viewer_can_select_but_not_write_through_a_connection(client, auth_heade
     assert r.status_code == 403
 
 
+def test_editor_write_through_a_connection_actually_persists(client, auth_headers, workspace_id):
+    """Regression test for a real bug: run_query_sync used engine.connect()
+    with no commit, so an editor's INSERT looked like it succeeded (the API
+    even returned 200) but was silently rolled back the instant the
+    connection closed -- and for statements with no result set at all,
+    iterating the result raised ResourceClosedError, which the route turned
+    into a confusing 400 for a write that should have been allowed. Checks
+    persistence through a second, independent sqlite3 connection to the same
+    file, not just the API's own response, since the bug could otherwise
+    hide behind an in-transaction read that looks correct but never lands
+    on disk."""
+    tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+    tmp.close()
+    conn = sqlite3.connect(tmp.name)
+    conn.execute("CREATE TABLE writable (id INTEGER PRIMARY KEY, label TEXT)")
+    conn.commit()
+    conn.close()
+
+    r = client.post(
+        f"/api/workspaces/{workspace_id}/connections",
+        json={"name": "write-persists-check", "config": {"connector_type": "sqlite", "path": tmp.name}},
+        headers=auth_headers,
+    )
+    connection_id = r.json()["id"]
+
+    r = client.post(
+        f"/api/workspaces/{workspace_id}/connections/{connection_id}/query",
+        json={"sql": "INSERT INTO writable (label) VALUES ('persisted')"},
+        headers=auth_headers,
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["row_count"] == 1  # one row affected, reported via result.rowcount
+    assert r.json()["columns"] == []
+
+    check_conn = sqlite3.connect(tmp.name)
+    rows = check_conn.execute("SELECT label FROM writable").fetchall()
+    check_conn.close()
+    assert rows == [("persisted",)]
+
+
 @pytest.mark.parametrize(
     "connector_type,fake_config",
     [
