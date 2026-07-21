@@ -7,7 +7,24 @@ from __future__ import annotations
 
 from rq import Worker
 
-from app.ai_jobs.queue import ai_queue, redis_conn
+# Every control-plane model must be imported before this process touches the
+# database, or SQLAlchemy's mapper never learns those tables exist. A job
+# function only imports the models it directly names (AiJob) -- but AiJob
+# has foreign keys to workspaces.id and users.id, and flushing a session
+# needs the FULL set of mapped tables to topologically sort them, not just
+# the one being written. Without these imports, the very first commit inside
+# run_ai_task (job.status = "running") crashes with
+# NoReferencedTableError -- verified empirically by actually running this
+# worker end-to-end (see alembic/env.py for the same requirement, and its
+# note on why app.auth.models must be imported first).
+from app.auth.models import User  # noqa: E402,F401
+
+from app.ai_jobs.models import AiJob  # noqa: E402,F401
+from app.connections.models import DataConnection  # noqa: E402,F401
+from app.files.models import File, FileRevision  # noqa: E402,F401
+from app.workspaces.models import AuditLogEntry, Workspace, WorkspaceMembership  # noqa: E402,F401
+
+from app.ai_jobs.queue import ai_queue, redis_conn  # noqa: E402
 
 if __name__ == "__main__":
     Worker([ai_queue], connection=redis_conn).work()

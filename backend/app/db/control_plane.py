@@ -9,6 +9,7 @@ Phase 0's).
 """
 from __future__ import annotations
 
+import sys
 from collections.abc import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -19,18 +20,23 @@ from app.core.config import get_settings
 
 settings = get_settings()
 
-# NullPool, not the default pooled engine -- asyncpg connections are bound
-# to the event loop that created them. This engine is a module-level
-# singleton (created once at import time), but the test suite spins up a
-# fresh TestClient (and therefore a fresh event loop) per test module --
-# with connection pooling, a connection opened under one module's loop gets
-# handed to a later module's different loop and asyncpg raises "Future
-# attached to a different loop". NullPool opens a fresh physical connection
-# per checkout instead of reusing one across calls, which sidesteps this
-# entirely. Fine for this control plane's query volume; a real
-# high-throughput deployment would front Postgres with something like
-# PgBouncer rather than reintroduce in-process pooling here.
-control_plane_engine = create_async_engine(settings.control_plane_db_url, future=True, poolclass=NullPool)
+# This engine is a module-level singleton (created once at import time), and
+# asyncpg connections are bound to the event loop that created them. The test
+# suite spins up a fresh TestClient (and therefore a fresh event loop) per
+# test module -- with the default pooled engine, a connection opened under
+# one module's loop gets handed to a later module's different loop and
+# asyncpg raises "Future attached to a different loop". That's a test-harness
+# problem (module-scoped TestClients each minting their own loop over one
+# shared engine), not a production one -- production runs a single event
+# loop where pooling is correct and wanted, so forcing NullPool unconditionally
+# would silently trade away real connection pooling on every request just to
+# satisfy the test fixtures. Gate it to test runs only ("pytest" lands in
+# sys.modules as soon as the pytest process starts, well before this module
+# is imported during collection); production keeps its default pool.
+_engine_kwargs: dict[str, object] = {"future": True}
+if "pytest" in sys.modules:
+    _engine_kwargs["poolclass"] = NullPool
+control_plane_engine = create_async_engine(settings.control_plane_db_url, **_engine_kwargs)
 ControlPlaneSessionLocal = async_sessionmaker(control_plane_engine, expire_on_commit=False)
 
 

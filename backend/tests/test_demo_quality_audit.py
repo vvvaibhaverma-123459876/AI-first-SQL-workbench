@@ -202,7 +202,7 @@ def test_assistant_run_surfaces_provider_fallback_in_warnings_and_steps(monkeypa
     monkeypatch.setattr(
         assistant_orchestrator.ai.provider,
         "generate",
-        lambda _p: (_ for _ in ()).throw(ConnectionError("simulated: no local Ollama runtime reachable")),
+        lambda _p, **_kw: (_ for _ in ()).throw(ConnectionError("simulated: no local Ollama runtime reachable")),
     )
     with TestClient(app) as client:
         r = client.post("/api/assistant/run", json={"question": "count of users per country", "execute": True, "explain": True, "use_cache": False})
@@ -216,53 +216,54 @@ def test_assistant_run_surfaces_provider_fallback_in_warnings_and_steps(monkeypa
 
 def test_full_demo_path_user_visible_output_is_correct(monkeypatch):
     """Runs the exact primary flow a newcomer following the README would
-    hit: AI_MODE=mock, POST /api/assistant/run for a README-suggested demo
+    hit: mock provider, POST /api/assistant/run for a README-suggested demo
     question, and asserts on the USER-VISIBLE response shape — the rendered
     SQL, the result rows, the table suggestions actually shown in the AI
     panel, and the absence of any raw error/URL/placeholder leakage — not on
     internal function return values. This is the contract: none of findings
-    1-4 can silently reappear without this failing."""
-    from app.core.config import get_settings
-    from app.llm.providers import get_provider
-    import os
+    1-4 can silently reappear without this failing.
 
-    prior = os.environ.get("AI_MODE")
-    os.environ["AI_MODE"] = "mock"
-    get_settings.cache_clear()
-    get_provider.cache_clear()
-    try:
-        from fastapi.testclient import TestClient
-        from app.main import app
+    Pins the mock provider directly onto the app's own long-lived singletons
+    (app.api.routes.ai_service and .assistant_orchestrator.ai, both built once
+    at import time) rather than setting AI_MODE and clearing the get_provider
+    lru_cache -- that only changes what a *future* get_provider() call
+    returns, it doesn't touch a provider reference a singleton already holds.
+    Setting AI_MODE here was a no-op that silently ran this test against
+    whatever real provider happened to be live (Ollama, if one was running on
+    the host), which is exactly how a demo-quality regression could slip back
+    in undetected."""
+    from app.api.routes import ai_service, assistant_orchestrator
+    from app.llm.providers import MockProvider
 
-        with TestClient(app) as client:
-            for question in README_SUGGESTED_DEMO_QUESTIONS:
-                r = client.post("/api/assistant/run", json={"question": question, "execute": True, "explain": True, "use_cache": False})
-                assert r.status_code == 200, question
-                body = r.json()
-                assert body["status"] == "success", f"{question}: {body.get('errors')}"
-                assert body["sql"] and body["sql"].strip().lower().startswith(("select", "with"))
-                assert body["result"] is not None and body["result"]["row_count"] > 0, f"{question}: empty result"
-                assert body["suggestions"], f"{question}: no table suggestions shown to the user"
-                for placeholder in ("TODO", "{var}", "None", "undefined", "NaN"):
-                    assert placeholder not in body["explanation"] if body["explanation"] else True
+    mock = MockProvider()
+    monkeypatch.setattr(ai_service, "provider", mock)
+    monkeypatch.setattr(assistant_orchestrator.ai, "provider", mock)
 
-            # Finding 1, end-to-end: distinct questions must not all show the
-            # same "Relevant Tables" panel contents.
-            seen = set()
-            for question in README_SUGGESTED_DEMO_QUESTIONS:
-                r = client.post("/api/suggest-tables", json={"prompt": question})
-                seen.add(tuple(sorted(s["table_name"] for s in r.json()["suggestions"])))
-            assert len(seen) > 1, f"Relevant Tables panel is identical for every demo question: {seen}"
+    from fastapi.testclient import TestClient
+    from app.main import app
 
-            # Finding 3, end-to-end: a realistic user error (typo'd column)
-            # must be an actionable message, never a stack trace/SQL dump.
-            r = client.post("/api/execute-sql", json={"sql": "SELECT nonexistent_col FROM users", "use_cache": False})
-            assert r.status_code == 400
-            assert "sqlalche.me" not in r.json()["detail"]
-    finally:
-        if prior is None:
-            os.environ.pop("AI_MODE", None)
-        else:
-            os.environ["AI_MODE"] = prior
-        get_settings.cache_clear()
-        get_provider.cache_clear()
+    with TestClient(app) as client:
+        for question in README_SUGGESTED_DEMO_QUESTIONS:
+            r = client.post("/api/assistant/run", json={"question": question, "execute": True, "explain": True, "use_cache": False})
+            assert r.status_code == 200, question
+            body = r.json()
+            assert body["status"] == "success", f"{question}: {body.get('errors')}"
+            assert body["sql"] and body["sql"].strip().lower().startswith(("select", "with"))
+            assert body["result"] is not None and body["result"]["row_count"] > 0, f"{question}: empty result"
+            assert body["suggestions"], f"{question}: no table suggestions shown to the user"
+            for placeholder in ("TODO", "{var}", "None", "undefined", "NaN"):
+                assert placeholder not in body["explanation"] if body["explanation"] else True
+
+        # Finding 1, end-to-end: distinct questions must not all show the
+        # same "Relevant Tables" panel contents.
+        seen = set()
+        for question in README_SUGGESTED_DEMO_QUESTIONS:
+            r = client.post("/api/suggest-tables", json={"prompt": question})
+            seen.add(tuple(sorted(s["table_name"] for s in r.json()["suggestions"])))
+        assert len(seen) > 1, f"Relevant Tables panel is identical for every demo question: {seen}"
+
+        # Finding 3, end-to-end: a realistic user error (typo'd column)
+        # must be an actionable message, never a stack trace/SQL dump.
+        r = client.post("/api/execute-sql", json={"sql": "SELECT nonexistent_col FROM users", "use_cache": False})
+        assert r.status_code == 400
+        assert "sqlalche.me" not in r.json()["detail"]
