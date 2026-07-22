@@ -25,6 +25,7 @@ from app.connections.models import DataConnection  # noqa: E402,F401
 from app.dashboards.models import Dashboard, DashboardItem  # noqa: E402,F401
 from app.files.models import File, FileRevision  # noqa: E402,F401
 from app.scheduled_queries.models import ScheduledQuery  # noqa: E402,F401
+from app.sharing.models import ResourceShare  # noqa: E402,F401
 from app.workspaces.models import AuditLogEntry, Workspace, WorkspaceMembership  # noqa: E402,F401
 
 from app.ai_jobs.queue import ai_queue, redis_conn  # noqa: E402

@@ -294,3 +294,112 @@ test('create a scheduled query and confirm "run now" reports a real result', asy
   await expect(page.getByText(/\(2 rows\)/)).toBeVisible()
   await page.screenshot({ path: 'e2e/screenshots/11-scheduled-run-now.png', fullPage: true })
 })
+
+// Phase 5a: additive external sharing, across two REAL separate browser
+// sessions/accounts (not the API-level assertions already covered in
+// tests/test_sharing.py) -- this is the "does this actually render for a
+// second human" proof, matching every other phase's live-UI discipline.
+// Account 2 is never made a member of account 1's workspace; access comes
+// only from the share grant, surfaced through the "Shared with me" list on
+// the workspace picker screen.
+test('share a file with a second account and confirm they can see and edit it, but only after being shared with', async ({ browser }) => {
+  const ownerContext = await browser.newContext()
+  const recipientContext = await browser.newContext()
+  const owner = await ownerContext.newPage()
+  const recipient = await recipientContext.newPage()
+
+  const ownerEmail = `smoke-share-owner-${Date.now()}@example.com`
+  const recipientEmail = `smoke-share-recipient-${Date.now()}@example.com`
+  const password = 'correct-horse-battery-staple'
+
+  try {
+    // Register the recipient FIRST -- sharing requires an existing account.
+    await recipient.goto('/')
+    await recipient.getByText("Don't have an account? Create one").click()
+    await recipient.getByLabel('Name').fill('Recipient')
+    await recipient.getByLabel('Email').fill(recipientEmail)
+    await recipient.getByLabel('Password').fill(password)
+    await recipient.getByRole('button', { name: 'Create account' }).click()
+    await expect(recipient.getByText('Workspaces')).toBeVisible({ timeout: 10_000 })
+    // No workspace of their own, and nothing shared yet -- the "Shared
+    // with me" section shouldn't even render.
+    await expect(recipient.getByText('Shared with me')).not.toBeVisible()
+
+    await owner.goto('/')
+    await owner.getByText("Don't have an account? Create one").click()
+    await owner.getByLabel('Name').fill('Owner')
+    await owner.getByLabel('Email').fill(ownerEmail)
+    await owner.getByLabel('Password').fill(password)
+    await owner.getByRole('button', { name: 'Create account' }).click()
+    await expect(owner.getByText('Workspaces')).toBeVisible({ timeout: 10_000 })
+    await owner.getByRole('button', { name: /New workspace/ }).click()
+    await owner.getByPlaceholder('Workspace name').fill('Sharing Demo Workspace')
+    await owner.getByRole('button', { name: 'Create' }).click()
+    await expect(owner.getByText('No files yet')).toBeVisible({ timeout: 10_000 })
+
+    owner.once('dialog', (dialog) => dialog.accept('shared-note.md'))
+    await owner.getByTitle('New file').first().click()
+    await expect(owner.locator('.monaco-editor').first()).toBeVisible({ timeout: 10_000 })
+    await owner.locator('.monaco-editor').first().click()
+    await owner.keyboard.type('# Shared from owner')
+    await owner.keyboard.press(process.platform === 'darwin' ? 'Meta+S' : 'Control+S')
+
+    await owner.getByText('shared-note.md').first().hover()
+    await owner.getByTitle('Share').click()
+    await owner.getByPlaceholder('Email address').fill(recipientEmail)
+    // exact:true -- "Share" (case-insensitive substring, Playwright's
+    // default for getByRole) would otherwise also match the open tab
+    // button, whose accessible name is "shared-note.md".
+    await owner.getByRole('button', { name: 'Share', exact: true }).click()
+    await expect(owner.getByText(recipientEmail)).toBeVisible({ timeout: 10_000 })
+    await owner.screenshot({ path: 'e2e/screenshots/12-share-dialog.png', fullPage: true })
+    await owner.keyboard.press('Escape')
+
+    // Recipient reloads their (already-open) workspace picker and the
+    // shared file now appears -- confirms the share grant, not a stale
+    // page, is what's driving this.
+    await recipient.reload()
+    await expect(recipient.getByText('Shared with me')).toBeVisible({ timeout: 10_000 })
+    await expect(recipient.getByText('shared-note.md')).toBeVisible()
+    await recipient.getByText('shared-note.md').click()
+
+    await expect(recipient.getByText('view only')).toBeVisible({ timeout: 10_000 })
+    await expect(recipient.locator('.monaco-editor').first()).toContainText('Shared from owner')
+    await recipient.screenshot({ path: 'e2e/screenshots/13-shared-file-view-only.png', fullPage: true })
+    // View-only: no Save button should be present at all.
+    await expect(recipient.getByRole('button', { name: 'Save' })).toHaveCount(0)
+
+    // Owner upgrades the share to editor.
+    await owner.reload()
+    await owner.getByText('shared-note.md').first().hover()
+    await owner.getByTitle('Share').click()
+    await owner.getByPlaceholder('Email address').fill(recipientEmail)
+    await owner.locator('select').selectOption('editor')
+    await owner.getByRole('button', { name: 'Share', exact: true }).click()
+    // The role label text itself is lowercase ("editor") with CSS
+    // uppercase styling applied only visually -- Playwright's getByText
+    // matches actual DOM text content, not rendered casing.
+    await expect(owner.getByText('editor', { exact: true })).toBeVisible({ timeout: 10_000 })
+
+    await recipient.getByRole('button', { name: 'Back' }).click()
+    await recipient.reload()
+    await recipient.getByText('shared-note.md').click()
+    await expect(recipient.getByText('can edit')).toBeVisible({ timeout: 10_000 })
+    await recipient.locator('.monaco-editor').first().click()
+    await recipient.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A')
+    await recipient.keyboard.type('# Edited by recipient')
+    await recipient.getByRole('button', { name: 'Save' }).click()
+    await expect(recipient.getByRole('button', { name: 'Save' })).toBeDisabled({ timeout: 10_000 })
+    await recipient.screenshot({ path: 'e2e/screenshots/14-shared-file-edited.png', fullPage: true })
+
+    // The owner's own copy reflects the recipient's edit -- proves the
+    // shared PATCH actually wrote through to the real File row, not a
+    // recipient-local draft.
+    await owner.reload()
+    await owner.getByText('shared-note.md').first().click()
+    await expect(owner.locator('.monaco-editor').first()).toContainText('Edited by recipient')
+  } finally {
+    await ownerContext.close()
+    await recipientContext.close()
+  }
+})

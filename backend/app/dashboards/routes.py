@@ -10,6 +10,8 @@ from app.auth.models import User
 from app.dashboards import service
 from app.dashboards.schemas import DashboardCreate, DashboardDetail, DashboardItemCreate, DashboardItemRead, DashboardItemUpdate, DashboardRead
 from app.db.control_plane import get_control_plane_session
+from app.sharing import service as sharing_service
+from app.sharing.schemas import ShareCreate, ShareRead
 from app.workspaces import service as workspace_service
 
 router = APIRouter(prefix="/workspaces/{workspace_id}/dashboards", tags=["dashboards"])
@@ -150,3 +152,58 @@ async def delete_item(
         raise HTTPException(status_code=404, detail="Dashboard not found") from exc
     except service.DashboardItemNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Dashboard item not found") from exc
+
+
+@router.post("/{dashboard_id}/shares", response_model=ShareRead)
+async def create_share(
+    workspace_id: uuid.UUID,
+    dashboard_id: uuid.UUID,
+    payload: ShareCreate,
+    user: User = Depends(current_active_user),
+    session: AsyncSession = Depends(get_control_plane_session),
+) -> ShareRead:
+    await _require_editor(session, workspace_id, user.id)
+    try:
+        await service.get_dashboard(session, workspace_id=workspace_id, dashboard_id=dashboard_id)
+    except service.DashboardNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Dashboard not found") from exc
+    try:
+        share = await sharing_service.create_share(
+            session, workspace_id=workspace_id, resource_type="dashboard", resource_id=dashboard_id, shared_by=user.id, email=payload.email, role=payload.role
+        )
+    except sharing_service.ShareTargetUserNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except sharing_service.InvalidShareRoleError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return ShareRead(id=share.id, shared_with_email=payload.email, role=share.role, created_at=share.created_at)
+
+
+@router.get("/{dashboard_id}/shares", response_model=list[ShareRead])
+async def list_shares(
+    workspace_id: uuid.UUID,
+    dashboard_id: uuid.UUID,
+    user: User = Depends(current_active_user),
+    session: AsyncSession = Depends(get_control_plane_session),
+) -> list[ShareRead]:
+    await _require_editor(session, workspace_id, user.id)
+    try:
+        await service.get_dashboard(session, workspace_id=workspace_id, dashboard_id=dashboard_id)
+    except service.DashboardNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Dashboard not found") from exc
+    shares = await sharing_service.list_shares_for_resource(session, resource_type="dashboard", resource_id=dashboard_id)
+    return [ShareRead(id=share.id, shared_with_email=email, role=share.role, created_at=share.created_at) for share, email in shares]
+
+
+@router.delete("/{dashboard_id}/shares/{share_id}", status_code=204, response_model=None)
+async def revoke_share(
+    workspace_id: uuid.UUID,
+    dashboard_id: uuid.UUID,
+    share_id: uuid.UUID,
+    user: User = Depends(current_active_user),
+    session: AsyncSession = Depends(get_control_plane_session),
+) -> None:
+    await _require_editor(session, workspace_id, user.id)
+    try:
+        await sharing_service.revoke_share(session, resource_type="dashboard", resource_id=dashboard_id, share_id=share_id)
+    except sharing_service.ShareNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Share not found") from exc
