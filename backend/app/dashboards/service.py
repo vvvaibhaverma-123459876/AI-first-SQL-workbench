@@ -67,11 +67,13 @@ async def get_dashboard(session: AsyncSession, *, workspace_id: uuid.UUID, dashb
 
 
 async def delete_dashboard(session: AsyncSession, *, workspace_id: uuid.UUID, dashboard_id: uuid.UUID, deleted_by: uuid.UUID) -> None:
+    from app.favorites.service import delete_favorites_for_resource  # local: avoids a module-level dashboards<->favorites import cycle
     from app.sharing.service import delete_shares_for_resource  # local: avoids a module-level dashboards<->sharing import cycle
 
     dashboard = await get_dashboard(session, workspace_id=workspace_id, dashboard_id=dashboard_id)
     await session.execute(delete(DashboardItem).where(DashboardItem.dashboard_id == dashboard.id))
     await delete_shares_for_resource(session, resource_type="dashboard", resource_id=dashboard.id)
+    await delete_favorites_for_resource(session, resource_type="dashboard", resource_id=dashboard.id)
     await session.delete(dashboard)
     session.add(AuditLogEntry(workspace_id=workspace_id, user_id=deleted_by, action="dashboard.deleted", detail=dashboard.name))
     await session.commit()
