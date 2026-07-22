@@ -1,16 +1,19 @@
 import { useEffect, useState } from 'react'
-import { LayoutDashboard, Plus, Trash2 } from 'lucide-react'
+import { LayoutDashboard, Plus, Star, Trash2 } from 'lucide-react'
 import { useDashboardStore } from '../../store/useDashboardStore'
+import { useFavoritesStore } from '../../store/useFavoritesStore'
 
 export function DashboardsPanel({ workspaceId, onOpen }: { workspaceId: string; onOpen: (dashboardId: string) => void }) {
   const { dashboards, loadDashboards, createDashboard, deleteDashboard } = useDashboardStore()
+  const { isFavorited, toggleFavorite, loadFavorites } = useFavoritesStore()
   const [creating, setCreating] = useState(false)
   const [name, setName] = useState('')
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     loadDashboards(workspaceId)
-  }, [workspaceId, loadDashboards])
+    loadFavorites(workspaceId)
+  }, [workspaceId, loadDashboards, loadFavorites])
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -41,17 +44,27 @@ export function DashboardsPanel({ workspaceId, onOpen }: { workspaceId: string; 
         {dashboards.length === 0 && !creating ? (
           <div className="muted px-3 py-4 text-xs">No dashboards yet. Create one above.</div>
         ) : (
-          dashboards.map((d) => (
-            <div key={d.id} className="group flex items-center gap-1.5 rounded px-2 py-1.5 text-sm hover:bg-slate-800/60">
-              <button className="flex min-w-0 flex-1 items-center gap-1.5 !border-0 !bg-transparent !p-0 text-left" onClick={() => onOpen(d.id)}>
-                <LayoutDashboard size={13} className="shrink-0 text-blue-400" />
-                <span className="truncate text-slate-200">{d.name}</span>
-              </button>
-              <button className="ml-auto hidden !border-0 !bg-transparent !p-0.5 group-hover:block hover:!text-rose-400" title="Delete" onClick={() => handleDelete(d.id, d.name)}>
-                <Trash2 size={12} />
-              </button>
-            </div>
-          ))
+          dashboards.map((d) => {
+            const favorited = isFavorited('dashboard', d.id)
+            return (
+              <div key={d.id} className="group flex items-center gap-1.5 rounded px-2 py-1.5 text-sm hover:bg-slate-800/60">
+                <button className="flex min-w-0 flex-1 items-center gap-1.5 !border-0 !bg-transparent !p-0 text-left" onClick={() => onOpen(d.id)}>
+                  <LayoutDashboard size={13} className="shrink-0 text-blue-400" />
+                  <span className="truncate text-slate-200">{d.name}</span>
+                </button>
+                <button
+                  className={`ml-auto !border-0 !bg-transparent !p-0.5 ${favorited ? 'block text-amber-400' : 'hidden group-hover:block'}`}
+                  title={favorited ? 'Remove from favorites' : 'Add to favorites'}
+                  onClick={() => toggleFavorite(workspaceId, 'dashboard', d.id)}
+                >
+                  <Star size={12} fill={favorited ? 'currentColor' : 'none'} />
+                </button>
+                <button className="hidden !border-0 !bg-transparent !p-0.5 group-hover:block hover:!text-rose-400" title="Delete" onClick={() => handleDelete(d.id, d.name)}>
+                  <Trash2 size={12} />
+                </button>
+              </div>
+            )
+          })
         )}
       </div>
       {creating && (

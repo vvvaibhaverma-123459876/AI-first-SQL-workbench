@@ -39,6 +39,7 @@ from app.ai_jobs.routes import router as ai_jobs_router
 from app.connections.embedding_models import SchemaEmbedding  # noqa: F401
 from app.connections.routes import router as connections_router
 from app.dashboards.routes import router as dashboards_router
+from app.favorites.routes import router as favorites_router
 from app.files.routes import router as files_router
 from app.scheduled_queries.routes import router as scheduled_queries_router
 from app.sharing.routes import router as sharing_router
@@ -83,6 +84,7 @@ app.include_router(ai_jobs_router, prefix=settings.api_prefix)
 app.include_router(dashboards_router, prefix=settings.api_prefix)
 app.include_router(scheduled_queries_router, prefix=settings.api_prefix)
 app.include_router(sharing_router, prefix=settings.api_prefix)
+app.include_router(favorites_router, prefix=settings.api_prefix)
 
 # Backward compatibility for older frontend/tests/scripts that still call root endpoints.
 app.include_router(router)

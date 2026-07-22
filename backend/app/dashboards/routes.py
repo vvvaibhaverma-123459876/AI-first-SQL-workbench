@@ -10,6 +10,8 @@ from app.auth.models import User
 from app.dashboards import service
 from app.dashboards.schemas import DashboardCreate, DashboardDetail, DashboardItemCreate, DashboardItemRead, DashboardItemUpdate, DashboardRead
 from app.db.control_plane import get_control_plane_session
+from app.favorites import service as favorites_service
+from app.favorites.schemas import FavoriteRead
 from app.sharing import service as sharing_service
 from app.sharing.schemas import ShareCreate, ShareRead
 from app.workspaces import service as workspace_service
@@ -207,3 +209,30 @@ async def revoke_share(
         await sharing_service.revoke_share(session, resource_type="dashboard", resource_id=dashboard_id, share_id=share_id)
     except sharing_service.ShareNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Share not found") from exc
+
+
+@router.put("/{dashboard_id}/favorite", response_model=FavoriteRead)
+async def favorite_dashboard(
+    workspace_id: uuid.UUID,
+    dashboard_id: uuid.UUID,
+    user: User = Depends(current_active_user),
+    session: AsyncSession = Depends(get_control_plane_session),
+) -> FavoriteRead:
+    await _require_viewer(session, workspace_id, user.id)
+    try:
+        await service.get_dashboard(session, workspace_id=workspace_id, dashboard_id=dashboard_id)
+    except service.DashboardNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Dashboard not found") from exc
+    favorite = await favorites_service.add_favorite(session, workspace_id=workspace_id, resource_type="dashboard", resource_id=dashboard_id, user_id=user.id)
+    return FavoriteRead.model_validate(favorite)
+
+
+@router.delete("/{dashboard_id}/favorite", status_code=204, response_model=None)
+async def unfavorite_dashboard(
+    workspace_id: uuid.UUID,
+    dashboard_id: uuid.UUID,
+    user: User = Depends(current_active_user),
+    session: AsyncSession = Depends(get_control_plane_session),
+) -> None:
+    await _require_viewer(session, workspace_id, user.id)
+    await favorites_service.remove_favorite(session, resource_type="dashboard", resource_id=dashboard_id, user_id=user.id)
