@@ -126,8 +126,11 @@ async def delete_file(session: AsyncSession, *, workspace_id: uuid.UUID, file_id
         subtree.append(current)
         stack.extend(by_parent.get(current.id, []))
 
+    from app.sharing.service import delete_shares_for_resource  # local: avoids a module-level files<->sharing import cycle
+
     for f in reversed(subtree):
         await session.execute(delete(FileRevision).where(FileRevision.file_id == f.id))
+        await delete_shares_for_resource(session, resource_type="file", resource_id=f.id)
         await session.delete(f)
     session.add(AuditLogEntry(workspace_id=workspace_id, user_id=deleted_by, action="file.deleted", detail=file.name))
     await session.commit()

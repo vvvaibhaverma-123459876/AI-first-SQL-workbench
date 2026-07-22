@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
-import { Plus } from 'lucide-react'
+import { Plus, Share2 } from 'lucide-react'
 import { useConnectionStore } from '../../store/useConnectionStore'
 import { useDashboardStore } from '../../store/useDashboardStore'
 import type { ChartType } from '../../types'
 import { DashboardTile } from './DashboardTile'
+import { ShareDialog } from './ShareDialog'
 
 const CHART_TYPES: ChartType[] = ['table', 'bar', 'line', 'pie', 'scatter']
 
@@ -11,6 +12,7 @@ export function DashboardView({ workspaceId, dashboardId }: { workspaceId: strin
   const { currentDashboard, loading, error, loadDashboard, addItem } = useDashboardStore()
   const { connections, loadConnections } = useConnectionStore()
   const [showAddForm, setShowAddForm] = useState(false)
+  const [sharing, setSharing] = useState(false)
   const [title, setTitle] = useState('')
   const [connectionId, setConnectionId] = useState('')
   const [sql, setSql] = useState('')
@@ -50,11 +52,18 @@ export function DashboardView({ workspaceId, dashboardId }: { workspaceId: strin
     <div className="flex h-full flex-col overflow-auto p-3">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-sm font-semibold text-slate-100">{currentDashboard.name}</h2>
-        <button className="flex items-center gap-1 !py-1 !text-xs" onClick={() => setShowAddForm((v) => !v)}>
-          <Plus size={13} />
-          Add chart
-        </button>
+        <div className="flex items-center gap-2">
+          <button className="flex items-center gap-1 !py-1 !text-xs" onClick={() => setSharing(true)}>
+            <Share2 size={13} />
+            Share
+          </button>
+          <button className="flex items-center gap-1 !py-1 !text-xs" onClick={() => setShowAddForm((v) => !v)}>
+            <Plus size={13} />
+            Add chart
+          </button>
+        </div>
       </div>
+      {sharing && <ShareDialog workspaceId={workspaceId} resourceType="dashboard" resourceId={dashboardId} resourceName={currentDashboard.name} onClose={() => setSharing(false)} />}
 
       {showAddForm && (
         <div className="mb-4 rounded-lg border border-slate-800 bg-slate-900/60 p-3">
