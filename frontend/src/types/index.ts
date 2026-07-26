@@ -288,3 +288,13 @@ export type SharedDashboard = {
   role: ShareRole
   items: SharedDashboardItem[]
 }
+
+export type FavoriteResourceType = 'file' | 'dashboard'
+
+export type FavoriteSummary = {
+  favorite_id: string
+  resource_type: FavoriteResourceType
+  resource_id: string
+  resource_name: string
+  created_at: string
+}

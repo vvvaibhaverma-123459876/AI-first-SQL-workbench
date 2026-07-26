@@ -8,6 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.backend import current_active_user
 from app.auth.models import User
 from app.db.control_plane import get_control_plane_session
+from app.favorites import service as favorites_service
+from app.favorites.schemas import FavoriteRead
 from app.files import service
 from app.files.schemas import FileCreate, FileDetail, FileNode, FileRevisionRead, FileSearchResult, FileUpdate
 from app.sharing import service as sharing_service
@@ -196,3 +198,32 @@ async def revoke_share(
         await sharing_service.revoke_share(session, resource_type="file", resource_id=file_id, share_id=share_id)
     except sharing_service.ShareNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Share not found") from exc
+
+
+@router.put("/{file_id}/favorite", response_model=FavoriteRead)
+async def favorite_file(
+    workspace_id: uuid.UUID,
+    file_id: uuid.UUID,
+    user: User = Depends(current_active_user),
+    session: AsyncSession = Depends(get_control_plane_session),
+) -> FavoriteRead:
+    # viewer+, not editor+: favoriting is a personal bookmark, not a write
+    # to the resource itself.
+    await _require_viewer(session, workspace_id, user.id)
+    try:
+        await service.get_file(session, workspace_id=workspace_id, file_id=file_id)
+    except service.FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="File not found") from exc
+    favorite = await favorites_service.add_favorite(session, workspace_id=workspace_id, resource_type="file", resource_id=file_id, user_id=user.id)
+    return FavoriteRead.model_validate(favorite)
+
+
+@router.delete("/{file_id}/favorite", status_code=204, response_model=None)
+async def unfavorite_file(
+    workspace_id: uuid.UUID,
+    file_id: uuid.UUID,
+    user: User = Depends(current_active_user),
+    session: AsyncSession = Depends(get_control_plane_session),
+) -> None:
+    await _require_viewer(session, workspace_id, user.id)
+    await favorites_service.remove_favorite(session, resource_type="file", resource_id=file_id, user_id=user.id)

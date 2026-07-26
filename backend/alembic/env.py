@@ -28,6 +28,7 @@ from app.connections.models import DataConnection  # noqa: E402,F401
 from app.core.config import get_settings  # noqa: E402
 from app.dashboards.models import Dashboard, DashboardItem  # noqa: E402,F401
 from app.db.control_plane import ControlPlaneBase  # noqa: E402
+from app.favorites.models import Favorite  # noqa: E402,F401
 from app.files.models import File, FileRevision  # noqa: E402,F401
 from app.scheduled_queries.models import ScheduledQuery  # noqa: E402,F401
 from app.sharing.models import ResourceShare  # noqa: E402,F401

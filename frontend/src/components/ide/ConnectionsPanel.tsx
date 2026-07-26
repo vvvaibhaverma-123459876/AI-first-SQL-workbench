@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { CheckCircle2, Database, Plus, Trash2, XCircle } from 'lucide-react'
+import { CheckCircle2, ChevronDown, ChevronRight, Columns3, Database, Plus, Table2, Trash2, XCircle } from 'lucide-react'
 import { useConnectionStore } from '../../store/useConnectionStore'
 import type { ConnectorType } from '../../types'
 
@@ -136,10 +136,63 @@ function NewConnectionForm({ workspaceId, onDone }: { workspaceId: string; onDon
   )
 }
 
+function SchemaTree({ workspaceId, connectionId }: { workspaceId: string; connectionId: string }) {
+  const { schemaByConnection, loadSchema } = useConnectionStore()
+  const [expandedTables, setExpandedTables] = useState<Set<string>>(new Set())
+  const [loading, setLoading] = useState(true)
+  const tables = schemaByConnection[connectionId]
+
+  useEffect(() => {
+    setLoading(true)
+    loadSchema(workspaceId, connectionId).finally(() => setLoading(false))
+    // Deliberately does not call setActiveConnectionId: browsing a schema
+    // tree is read-only exploration and must not silently repoint which
+    // connection the open SQL file's autocomplete resolves against.
+  }, [workspaceId, connectionId, loadSchema])
+
+  const toggleTable = (name: string) => {
+    setExpandedTables((prev) => {
+      const next = new Set(prev)
+      if (next.has(name)) next.delete(name)
+      else next.add(name)
+      return next
+    })
+  }
+
+  if (loading && !tables) return <div className="muted px-6 py-1.5 text-xs">Loading schema…</div>
+  if (!tables || tables.length === 0) return <div className="muted px-6 py-1.5 text-xs">No tables found.</div>
+
+  return (
+    <div className="pb-1">
+      {tables.map((t) => (
+        <div key={t.name}>
+          <button
+            className="flex w-full items-center gap-1.5 !border-0 !bg-transparent px-6 py-1 text-left text-xs text-slate-300 hover:!bg-slate-800/60"
+            onClick={() => toggleTable(t.name)}
+          >
+            {expandedTables.has(t.name) ? <ChevronDown size={11} className="shrink-0 text-slate-500" /> : <ChevronRight size={11} className="shrink-0 text-slate-500" />}
+            <Table2 size={12} className="shrink-0 text-emerald-500" />
+            <span className="truncate">{t.name}</span>
+          </button>
+          {expandedTables.has(t.name) &&
+            t.columns.map((col) => (
+              <div key={col.name} className="flex items-center gap-1.5 px-11 py-0.5 text-[11px] text-slate-400">
+                <Columns3 size={10} className="shrink-0 text-slate-600" />
+                <span className="truncate">{col.name}</span>
+                <span className="muted ml-auto shrink-0 text-[10px]">{col.type}</span>
+              </div>
+            ))}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export function ConnectionsPanel({ workspaceId }: { workspaceId: string }) {
   const { connections, loadConnections, deleteConnection, testConnection } = useConnectionStore()
   const [creating, setCreating] = useState(false)
   const [testing, setTesting] = useState<string | null>(null)
+  const [expandedConnections, setExpandedConnections] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     loadConnections(workspaceId)
@@ -158,6 +211,15 @@ export function ConnectionsPanel({ workspaceId }: { workspaceId: string }) {
     if (confirm(`Delete connection "${name}"?`)) await deleteConnection(workspaceId, connectionId)
   }
 
+  const toggleExpanded = (connectionId: string) => {
+    setExpandedConnections((prev) => {
+      const next = new Set(prev)
+      if (next.has(connectionId)) next.delete(connectionId)
+      else next.add(connectionId)
+      return next
+    })
+  }
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between px-2 py-2">
@@ -171,20 +233,26 @@ export function ConnectionsPanel({ workspaceId }: { workspaceId: string }) {
           <div className="muted px-3 py-4 text-xs">No connections yet. Create one above.</div>
         ) : (
           connections.map((c) => (
-            <div key={c.id} className="group flex items-center gap-1.5 rounded px-2 py-1.5 text-sm hover:bg-slate-800/60">
-              <Database size={13} className="shrink-0 text-blue-400" />
-              <span className="truncate text-slate-200">{c.name}</span>
-              <span className="muted shrink-0 text-[10px] uppercase tracking-wide">{c.connector_type}</span>
-              {c.last_test_ok === true && <CheckCircle2 size={12} className="shrink-0 text-emerald-500" />}
-              {c.last_test_ok === false && <XCircle size={12} className="shrink-0 text-rose-500" />}
-              <span className="ml-auto hidden shrink-0 items-center gap-1 group-hover:flex">
-                <button className="!border-0 !bg-transparent !p-0.5 text-[10px]" onClick={() => handleTest(c.id)} disabled={testing === c.id}>
-                  {testing === c.id ? '…' : 'Test'}
+            <div key={c.id}>
+              <div className="group flex items-center gap-1.5 rounded px-2 py-1.5 text-sm hover:bg-slate-800/60">
+                <button className="!border-0 !bg-transparent !p-0" title="Browse schema" onClick={() => toggleExpanded(c.id)}>
+                  {expandedConnections.has(c.id) ? <ChevronDown size={12} className="shrink-0 text-slate-500" /> : <ChevronRight size={12} className="shrink-0 text-slate-500" />}
                 </button>
-                <button className="!border-0 !bg-transparent !p-0.5 hover:!text-rose-400" title="Delete" onClick={() => handleDelete(c.id, c.name)}>
-                  <Trash2 size={12} />
-                </button>
-              </span>
+                <Database size={13} className="shrink-0 text-blue-400" />
+                <span className="truncate text-slate-200">{c.name}</span>
+                <span className="muted shrink-0 text-[10px] uppercase tracking-wide">{c.connector_type}</span>
+                {c.last_test_ok === true && <CheckCircle2 size={12} className="shrink-0 text-emerald-500" />}
+                {c.last_test_ok === false && <XCircle size={12} className="shrink-0 text-rose-500" />}
+                <span className="ml-auto hidden shrink-0 items-center gap-1 group-hover:flex">
+                  <button className="!border-0 !bg-transparent !p-0.5 text-[10px]" onClick={() => handleTest(c.id)} disabled={testing === c.id}>
+                    {testing === c.id ? '…' : 'Test'}
+                  </button>
+                  <button className="!border-0 !bg-transparent !p-0.5 hover:!text-rose-400" title="Delete" onClick={() => handleDelete(c.id, c.name)}>
+                    <Trash2 size={12} />
+                  </button>
+                </span>
+              </div>
+              {expandedConnections.has(c.id) && <SchemaTree workspaceId={workspaceId} connectionId={c.id} />}
             </div>
           ))
         )}

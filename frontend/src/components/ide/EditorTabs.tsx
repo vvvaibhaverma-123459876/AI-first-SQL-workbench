@@ -1,12 +1,51 @@
 import Editor from '@monaco-editor/react'
+import type * as Monaco from 'monaco-editor'
 import { X } from 'lucide-react'
 import { useFileStore } from '../../store/useFileStore'
+import { useConnectionStore } from '../../store/useConnectionStore'
+import { buildSqlCompletionCandidates } from '../../utils/sqlCompletion'
 
 function languageFor(name: string): string {
   if (name.endsWith('.sql')) return 'sql'
   if (name.endsWith('.md')) return 'markdown'
   if (name.endsWith('.json')) return 'json'
   return 'plaintext'
+}
+
+// Module-level guard: Monaco's language registry is a page-wide singleton,
+// so registering per editor mount (StrictMode double-invoke, tab switches
+// remounting via `key={active.fileId}`) would stack duplicate providers and
+// show every suggestion twice. Register once; the callback reads live store
+// state on every keystroke so it still tracks whichever connection is active.
+let sqlCompletionProviderRegistered = false
+
+function registerSqlCompletionProvider(monaco: typeof Monaco) {
+  if (sqlCompletionProviderRegistered) return
+  sqlCompletionProviderRegistered = true
+  monaco.languages.registerCompletionItemProvider('sql', {
+    triggerCharacters: [' ', '.'],
+    provideCompletionItems: (model, position) => {
+      const { activeConnectionId, schemaByConnection } = useConnectionStore.getState()
+      const tables = activeConnectionId ? (schemaByConnection[activeConnectionId] ?? []) : []
+      const candidates = buildSqlCompletionCandidates(tables)
+      const word = model.getWordUntilPosition(position)
+      const range: Monaco.IRange = {
+        startLineNumber: position.lineNumber,
+        endLineNumber: position.lineNumber,
+        startColumn: word.startColumn,
+        endColumn: word.endColumn,
+      }
+      return {
+        suggestions: candidates.map((c) => ({
+          label: c.label,
+          kind: c.kind === 'table' ? monaco.languages.CompletionItemKind.Class : monaco.languages.CompletionItemKind.Field,
+          detail: c.detail,
+          insertText: c.label,
+          range,
+        })),
+      }
+    },
+  })
 }
 
 function StatusDot({ status }: { status: string }) {
@@ -63,6 +102,7 @@ export function EditorTabs({ workspaceId }: { workspaceId: string }) {
             onChange={(value) => updateContent(workspaceId, active.fileId, value ?? '')}
             onMount={(editor, monaco) => {
               editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => saveNow(workspaceId, active.fileId))
+              registerSqlCompletionProvider(monaco)
             }}
             options={{ fontSize: 13, minimap: { enabled: false }, automaticLayout: true }}
           />

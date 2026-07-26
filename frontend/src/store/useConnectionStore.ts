@@ -15,6 +15,11 @@ type ConnectionState = {
   queryResult: ConnectionQueryResult | null
   queryError: string | null
   queryRunning: boolean
+  // The connection a SQL editor tab's autocomplete resolves against. Set only
+  // when the user explicitly picks a connection to run against (QueryRunner) --
+  // not when merely browsing another connection's schema tree, so browsing
+  // never silently repoints completions for the file being edited.
+  activeConnectionId: string | null
 
   loadConnections: (workspaceId: string) => Promise<void>
   createConnection: (workspaceId: string, name: string, connectorType: ConnectorType, config: Record<string, unknown>) => Promise<void>
@@ -22,15 +27,17 @@ type ConnectionState = {
   testConnection: (workspaceId: string, connectionId: string) => Promise<TestConnectionResult>
   loadSchema: (workspaceId: string, connectionId: string) => Promise<void>
   runQuery: (workspaceId: string, connectionId: string, sql: string) => Promise<void>
+  setActiveConnectionId: (workspaceId: string, connectionId: string | null) => void
 }
 
-export const useConnectionStore = create<ConnectionState>((set) => ({
+export const useConnectionStore = create<ConnectionState>((set, get) => ({
   connections: [],
   loadingConnections: false,
   schemaByConnection: {},
   queryResult: null,
   queryError: null,
   queryRunning: false,
+  activeConnectionId: null,
 
   loadConnections: async (workspaceId) => {
     set({ loadingConnections: true })
@@ -77,6 +84,15 @@ export const useConnectionStore = create<ConnectionState>((set) => ({
     } catch (err) {
       const message = (err as { response?: { data?: { detail?: string } } }).response?.data?.detail ?? 'Query failed.'
       set({ queryError: message, queryResult: null, queryRunning: false })
+    }
+  },
+
+  setActiveConnectionId: (workspaceId, connectionId) => {
+    set({ activeConnectionId: connectionId })
+    // Eager-load so autocomplete has schema the moment a connection is
+    // selected, not only once a user happens to expand its schema tree.
+    if (connectionId && !get().schemaByConnection[connectionId]) {
+      void get().loadSchema(workspaceId, connectionId)
     }
   },
 }))

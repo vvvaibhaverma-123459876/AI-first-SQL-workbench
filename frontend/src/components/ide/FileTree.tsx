@@ -1,5 +1,6 @@
-import { ChevronDown, ChevronRight, File, Folder, FolderPlus, FilePlus, Share2, Trash2 } from 'lucide-react'
-import { useState } from 'react'
+import { ChevronDown, ChevronRight, File, Folder, FolderPlus, FilePlus, Share2, Star, Trash2 } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { useFavoritesStore } from '../../store/useFavoritesStore'
 import { useFileStore } from '../../store/useFileStore'
 import type { FileNode } from '../../types'
 import { ShareDialog } from './ShareDialog'
@@ -10,9 +11,11 @@ function children(files: FileNode[], parentId: string | null): FileNode[] {
 
 function TreeNode({ workspaceId, node, depth }: { workspaceId: string; node: FileNode; depth: number }) {
   const { files, openFile, activeTabId, deleteFile, createFile } = useFileStore()
+  const { isFavorited, toggleFavorite } = useFavoritesStore()
   const [expanded, setExpanded] = useState(true)
   const [sharing, setSharing] = useState(false)
   const kids = node.is_folder ? children(files, node.id) : []
+  const favorited = !node.is_folder && isFavorited('file', node.id)
 
   const handleClick = () => {
     if (node.is_folder) setExpanded((e) => !e)
@@ -48,7 +51,16 @@ function TreeNode({ workspaceId, node, depth }: { workspaceId: string; node: Fil
         )}
         {node.is_folder ? <Folder size={14} className="shrink-0 text-blue-400" /> : <File size={14} className="shrink-0 text-slate-400" />}
         <span className={`truncate ${activeTabId === node.id ? 'text-blue-300' : 'text-slate-200'}`}>{node.name}</span>
-        <span className="ml-auto hidden shrink-0 items-center gap-1 group-hover:flex">
+        {!node.is_folder && favorited && (
+          <button
+            className="!ml-auto shrink-0 !border-0 !bg-transparent !p-0.5 text-amber-400"
+            title="Remove from favorites"
+            onClick={(e) => { e.stopPropagation(); toggleFavorite(workspaceId, 'file', node.id) }}
+          >
+            <Star size={12} fill="currentColor" />
+          </button>
+        )}
+        <span className={`${favorited ? '' : 'ml-auto'} hidden shrink-0 items-center gap-1 group-hover:flex`}>
           {node.is_folder && (
             <>
               <button className="!border-0 !bg-transparent !p-0.5" title="New file" onClick={(e) => handleAddChild(e, false)}>
@@ -60,9 +72,20 @@ function TreeNode({ workspaceId, node, depth }: { workspaceId: string; node: Fil
             </>
           )}
           {!node.is_folder && (
-            <button className="!border-0 !bg-transparent !p-0.5" title="Share" onClick={(e) => { e.stopPropagation(); setSharing(true) }}>
-              <Share2 size={12} />
-            </button>
+            <>
+              {!favorited && (
+                <button
+                  className="!border-0 !bg-transparent !p-0.5"
+                  title="Add to favorites"
+                  onClick={(e) => { e.stopPropagation(); toggleFavorite(workspaceId, 'file', node.id) }}
+                >
+                  <Star size={12} fill="none" />
+                </button>
+              )}
+              <button className="!border-0 !bg-transparent !p-0.5" title="Share" onClick={(e) => { e.stopPropagation(); setSharing(true) }}>
+                <Share2 size={12} />
+              </button>
+            </>
           )}
           <button className="!border-0 !bg-transparent !p-0.5 hover:!text-rose-400" title="Delete" onClick={handleDelete}>
             <Trash2 size={12} />
@@ -77,7 +100,12 @@ function TreeNode({ workspaceId, node, depth }: { workspaceId: string; node: Fil
 
 export function FileTree({ workspaceId }: { workspaceId: string }) {
   const { files, createFile, openFile } = useFileStore()
+  const loadFavorites = useFavoritesStore((s) => s.loadFavorites)
   const roots = children(files, null)
+
+  useEffect(() => {
+    loadFavorites(workspaceId)
+  }, [workspaceId, loadFavorites])
 
   return (
     <div className="flex h-full flex-col">

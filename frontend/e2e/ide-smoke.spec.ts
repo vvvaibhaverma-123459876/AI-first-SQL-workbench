@@ -403,3 +403,108 @@ test('share a file with a second account and confirm they can see and edit it, b
     await recipientContext.close()
   }
 })
+
+// Phase 5b: schema-tree browser + live-schema autocomplete. The done-when
+// for the whole of Phase 5 names this specifically ("autocomplete works
+// against a real connection's live schema"), so this is the load-bearing
+// verification for the phase, not a nice-to-have. Deliberately does NOT
+// expand the Connections schema tree before triggering autocomplete --
+// useConnectionStore.setActiveConnectionId eager-loads schema the moment a
+// connection is selected (QueryRunner's auto-select-first-connection effect
+// does that here), so relying on the tree's own on-expand fetch would mask
+// a real gap where autocomplete is silently empty until a user happens to
+// browse the tree first.
+test('autocomplete suggests a real table from a connection\'s live schema, and the schema tree browses it', async ({ page }) => {
+  const sqlitePath = process.env.PLAYWRIGHT_SQLITE_FIXTURE
+  test.skip(!sqlitePath, 'PLAYWRIGHT_SQLITE_FIXTURE not set')
+
+  const email = `smoke-autocomplete-${Date.now()}@example.com`
+  const password = 'correct-horse-battery-staple'
+
+  await page.goto('/')
+  await page.getByText("Don't have an account? Create one").click()
+  await page.getByLabel('Name').fill('Smoke Test')
+  await page.getByLabel('Email').fill(email)
+  await page.getByLabel('Password').fill(password)
+  await page.getByRole('button', { name: 'Create account' }).click()
+
+  await expect(page.getByText('Workspaces')).toBeVisible({ timeout: 10_000 })
+  await page.getByRole('button', { name: /New workspace/ }).click()
+  await page.getByPlaceholder('Workspace name').fill('Autocomplete Workspace')
+  await page.getByRole('button', { name: 'Create' }).click()
+  await expect(page.getByText('No files yet')).toBeVisible({ timeout: 10_000 })
+
+  await page.getByRole('button', { name: 'Connections' }).click()
+  await page.getByTitle('New connection').click()
+  await page.getByPlaceholder('Connection name').fill('widgets-db')
+  await page.locator('select').selectOption('sqlite')
+  await page.getByPlaceholder('File path (on the server)').fill(sqlitePath!)
+  await page.getByRole('button', { name: 'Create' }).click()
+  await expect(page.getByText('widgets-db')).toBeVisible({ timeout: 10_000 })
+
+  page.once('dialog', (dialog) => dialog.accept('autocomplete.sql'))
+  await page.getByRole('button', { name: 'Files' }).click()
+  await page.getByTitle('New file').first().click()
+  await expect(page.locator('.monaco-editor').first()).toBeVisible({ timeout: 10_000 })
+
+  // QueryRunner only renders for .sql files -- its mount is what fires the
+  // auto-select-first-connection effect. Confirms that happened (and thus
+  // schema eager-loaded) before touching the editor at all.
+  await expect(page.locator('select').first()).toContainText('widgets-db', { timeout: 10_000 })
+
+  await page.locator('.monaco-editor').first().click()
+  await page.keyboard.type('select * from wid')
+  await page.keyboard.press('Control+Space')
+  await expect(page.locator('.monaco-editor .suggest-widget')).toBeVisible({ timeout: 10_000 })
+  await expect(page.locator('.monaco-editor .suggest-widget')).toContainText('widgets')
+  await page.screenshot({ path: 'e2e/screenshots/15-sql-autocomplete.png', fullPage: true })
+  await page.keyboard.press('Escape')
+
+  // Schema-tree browser: separate feature, same underlying schema fetch.
+  await page.getByRole('button', { name: 'Connections' }).click()
+  await page.getByTitle('Browse schema').click()
+  await expect(page.getByText('widgets', { exact: true })).toBeVisible({ timeout: 10_000 })
+  await page.getByText('widgets', { exact: true }).click()
+  await expect(page.getByText('label', { exact: true })).toBeVisible({ timeout: 10_000 })
+  await page.screenshot({ path: 'e2e/screenshots/16-schema-tree.png', fullPage: true })
+})
+
+// Phase 5b: favorites. A purely personal bookmark -- confirms the star
+// toggle round-trips through the real backend and survives a reload
+// (proving it's a durable server-side favorite, not local UI state).
+test('favorite a file and confirm it stays starred after a reload', async ({ page }) => {
+  const email = `smoke-favorites-${Date.now()}@example.com`
+  const password = 'correct-horse-battery-staple'
+
+  await page.goto('/')
+  await page.getByText("Don't have an account? Create one").click()
+  await page.getByLabel('Name').fill('Smoke Test')
+  await page.getByLabel('Email').fill(email)
+  await page.getByLabel('Password').fill(password)
+  await page.getByRole('button', { name: 'Create account' }).click()
+
+  await expect(page.getByText('Workspaces')).toBeVisible({ timeout: 10_000 })
+  await page.getByRole('button', { name: /New workspace/ }).click()
+  await page.getByPlaceholder('Workspace name').fill('Favorites Workspace')
+  await page.getByRole('button', { name: 'Create' }).click()
+  await expect(page.getByText('No files yet')).toBeVisible({ timeout: 10_000 })
+
+  page.once('dialog', (dialog) => dialog.accept('favorite-me.sql'))
+  await page.getByTitle('New file').first().click()
+  await expect(page.locator('.monaco-editor').first()).toBeVisible({ timeout: 10_000 })
+
+  await page.getByText('favorite-me.sql').first().hover()
+  await page.getByTitle('Add to favorites').click()
+  await expect(page.getByTitle('Remove from favorites')).toBeVisible({ timeout: 10_000 })
+  await page.screenshot({ path: 'e2e/screenshots/17-file-favorited.png', fullPage: true })
+
+  await page.reload()
+  await expect(page.getByText('favorite-me.sql')).toBeVisible({ timeout: 10_000 })
+  // The star is always rendered (not hover-gated) once a file is favorited
+  // -- confirms the favorite round-tripped through the backend and was
+  // reloaded from GET .../favorites, not held only in in-memory UI state.
+  await expect(page.getByTitle('Remove from favorites')).toBeVisible({ timeout: 10_000 })
+
+  await page.getByTitle('Remove from favorites').click()
+  await expect(page.getByTitle('Remove from favorites')).toHaveCount(0)
+})

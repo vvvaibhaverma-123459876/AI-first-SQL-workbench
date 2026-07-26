@@ -25,6 +25,7 @@ from app.ai_jobs.models import AiJob  # noqa: E402,F401
 from app.connections.embedding_models import SchemaEmbedding  # noqa: E402,F401
 from app.connections.models import DataConnection  # noqa: E402,F401
 from app.dashboards.models import Dashboard, DashboardItem  # noqa: E402,F401
+from app.favorites.models import Favorite  # noqa: E402,F401
 from app.files.models import File, FileRevision  # noqa: E402,F401
 from app.scheduled_queries.models import ScheduledQuery  # noqa: E402,F401
 from app.scheduled_queries.timing import tick  # noqa: E402

@@ -27,9 +27,9 @@ function toCSV(columns: string[], rows: Record<string, unknown>[]): string {
 }
 
 export function QueryRunner({ workspaceId, sql }: { workspaceId: string; sql: string }) {
-  const { connections, loadConnections, runQuery, queryResult, queryError, queryRunning } = useConnectionStore()
+  const { connections, loadConnections, runQuery, queryResult, queryError, queryRunning, activeConnectionId, setActiveConnectionId } = useConnectionStore()
   const { dashboards, loadDashboards, createDashboard, addItem } = useDashboardStore()
-  const [connectionId, setConnectionId] = useState<string>('')
+  const connectionId = activeConnectionId ?? ''
   const [chartType, setChartType] = useState<ChartType>('table')
   const [showPinMenu, setShowPinMenu] = useState(false)
   const [pinTarget, setPinTarget] = useState<'existing' | 'new'>('existing')
@@ -44,8 +44,8 @@ export function QueryRunner({ workspaceId, sql }: { workspaceId: string; sql: st
   }, [workspaceId, loadConnections])
 
   useEffect(() => {
-    if (!connectionId && connections.length > 0) setConnectionId(connections[0].id)
-  }, [connections, connectionId])
+    if (!connectionId && connections.length > 0) setActiveConnectionId(workspaceId, connections[0].id)
+  }, [connections, connectionId, workspaceId, setActiveConnectionId])
 
   const suggestion = useMemo(() => {
     if (!queryResult) return null
@@ -108,7 +108,7 @@ export function QueryRunner({ workspaceId, sql }: { workspaceId: string; sql: st
   return (
     <div className="flex h-full flex-col">
       <div className="flex flex-wrap items-center gap-2 border-b border-slate-800 px-2 py-1.5">
-        <select className="w-40 !py-1 !text-xs" value={connectionId} onChange={(e) => setConnectionId(e.target.value)}>
+        <select className="w-40 !py-1 !text-xs" value={connectionId} onChange={(e) => setActiveConnectionId(workspaceId, e.target.value)}>
           {connections.length === 0 && <option value="">No connections</option>}
           {connections.map((c) => (
             <option key={c.id} value={c.id}>
