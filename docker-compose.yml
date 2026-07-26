@@ -43,6 +43,29 @@ services:
     volumes:
       - ollama_models:/root/.ollama
 
+  # One-shot: runs the real Alembic migration chain to completion, then
+  # exits. app/worker/scheduler all gate on this via
+  # `condition: service_completed_successfully` instead of racing each
+  # other against Postgres directly -- found via an actual clean-machine
+  # `docker compose down -v && docker compose up` run (Phase 6's own
+  # done-when bar): with app running `alembic upgrade head` in its own
+  # entrypoint and worker/scheduler only waiting on Postgres being
+  # healthy (not on app's migrations finishing), the scheduler's very
+  # first tick queried `scheduled_queries` before that table existed --
+  # "relation \"scheduled_queries\" does not exist" -- a real crash on a
+  # genuinely fresh volume that every previous phase's CI never caught,
+  # because CI boots the API process directly (`uvicorn app.main:app`),
+  # never `docker compose up` from a clean volume.
+  migrate:
+    build: .
+    environment:
+      CONTROL_PLANE_DB_URL: postgresql+asyncpg://sqlstudio:sqlstudio@postgres:5432/sqlstudio
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: alembic upgrade head
+    working_dir: /app/backend
+
   app:
     build: .
     ports:
@@ -69,9 +92,9 @@ services:
         condition: service_healthy
       ollama:
         condition: service_started
-    # Real Postgres migrations before serving traffic — the same alembic
-    # history that backend/alembic/versions/ tracks, not just create_all.
-    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+      migrate:
+        condition: service_completed_successfully
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     working_dir: /app/backend
 
   worker:
@@ -92,6 +115,8 @@ services:
         condition: service_healthy
       ollama:
         condition: service_started
+      migrate:
+        condition: service_completed_successfully
     command: python -m app.worker
     working_dir: /app/backend
 
@@ -112,6 +137,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     command: python -m app.scheduler
     working_dir: /app/backend
 
