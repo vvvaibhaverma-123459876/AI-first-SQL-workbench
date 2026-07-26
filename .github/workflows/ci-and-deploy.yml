@@ -202,6 +202,68 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Docker Compose smoke test (genuinely clean machine, not a warm dev volume)
+        run: |
+          # Phase 6's own done-when: "the whole stack redeploys from
+          # docker compose up on a clean machine." Nothing above this step
+          # actually boots via docker-compose -- the pytest step runs
+          # uvicorn directly against CI's own postgres/redis SERVICE
+          # containers, and the build step above only builds an image, never
+          # runs it. Neither would have caught the real bug this step exists
+          # to guard against: on a genuinely fresh `pgdata` volume, worker
+          # and scheduler used to only wait on Postgres being healthy, not
+          # on app's own inline `alembic upgrade head` finishing -- the
+          # scheduler's first tick raced ahead of migrations and crashed
+          # with `relation "scheduled_queries" does not exist`. Fixed with a
+          # dedicated one-shot `migrate` service every other service now
+          # depends on via `condition: service_completed_successfully` (see
+          # docker-compose.yml) -- this step is what keeps that fix from
+          # silently regressing.
+          #
+          # The earlier "Start backend for e2e smoke test" step nohup'd a
+          # bare `uvicorn app.main:app --host 0.0.0.0 --port 8000` that is
+          # NEVER killed -- it's still bound to :8000 when this step runs.
+          # Without killing it first, `docker compose up`'s app service
+          # (also ports: 8000:8000) either fails to bind with a confusing
+          # "port is already allocated", or -- worse -- silently doesn't,
+          # and every curl/compose-ps check below ends up talking to that
+          # leftover process instead of the compose stack, verifying
+          # nothing while still reporting green. Found by advisor review
+          # before this step ever ran in real CI, not by a failure.
+          pkill -f "uvicorn app.main:app" || true
+          pkill -f "app.worker" || true
+          pkill -f "app.scheduler" || true
+          set -eu
+          docker compose build
+          docker compose up -d postgres redis migrate app worker scheduler
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8000/api/health > /dev/null && break
+            sleep 2
+            if [ "$i" = "30" ]; then
+              echo "::error::App never became healthy against a clean compose volume"
+              docker compose logs
+              exit 1
+            fi
+          done
+          # The actual regression this step guards against: the scheduler
+          # crashing on its first tick before migrations finish. Give it a
+          # full tick interval (30s) plus margin, then confirm it's still
+          # up, not exited/restarting.
+          sleep 35
+          state=$(docker compose ps scheduler --format '{{.State}}')
+          if [ "$state" != "running" ]; then
+            echo "::error::scheduler is not running after a clean boot (state=$state) -- see logs below"
+            docker compose logs scheduler
+            exit 1
+          fi
+          if docker compose logs scheduler | grep -qi "does not exist\|traceback"; then
+            echo "::error::scheduler logged an error against a clean compose volume"
+            docker compose logs scheduler
+            exit 1
+          fi
+          docker compose logs migrate app worker scheduler
+          docker compose down -v
+
   deploy:
     name: Deploy
     runs-on: ubuntu-latest

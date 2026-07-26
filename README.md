@@ -273,20 +273,93 @@ Frontend at `http://localhost:5173`, backend at `http://localhost:8000`.
 
 ---
 
-## Docker
+## Docker (full v2 stack)
+
+`docker-compose.yml` boots the whole multi-user stack — Postgres (control
+plane: accounts, workspaces, files, connections, dashboards, sharing,
+scheduled queries), Redis (background jobs), Ollama (local AI), the API
+server, an RQ worker, a scheduler process, and a one-shot `migrate`
+service that runs the real Alembic migration chain before anything else
+starts:
 
 ```bash
 docker compose up --build
 ```
 
-Open `http://localhost:8000`. Expects Ollama on the host at:
+Open `http://localhost:8000`, sign up, and create a workspace.
 
-```env
-OLLAMA_BASE_URL=http://host.docker.internal:11434
+**Pull a model before expecting real AI output.** The `ollama` service
+starts with zero models — this is not a placeholder concern, it's what a
+genuinely clean `docker compose up` actually does (verified directly: a
+fresh stack's first AI call gets a real, visible `provider_fallback`
+message rather than hanging, exactly as designed — see
+`app/llm/providers.py` — but it's still the mock fallback, not real
+generation, until a model exists):
+
+```bash
+docker compose exec ollama ollama pull mistral:7b
 ```
 
+(or whichever model you set via `OLLAMA_MODEL` in `docker-compose.yml` —
+`mistral:7b` is the default, chosen for the reasons in that file's own
+comment). The pulled model persists in the `ollama_models` named volume
+across restarts — this is a one-time step per fresh volume, not per boot.
+
+**Migrations run once, automatically, before any service that needs the
+DB starts.** The `app`, `worker`, and `scheduler` services all declare
+`depends_on: migrate: condition: service_completed_successfully` — this
+exists because an earlier version of this file had `worker`/`scheduler`
+only waiting on Postgres being *healthy*, not on `app`'s own inline
+`alembic upgrade head` finishing, which raced against the scheduler's
+first tick and crashed with `relation "scheduled_queries" does not
+exist` on a genuinely fresh volume. Found by actually running
+`docker compose down -v && docker compose up` from scratch, not by
+inspection — CI never catches this class of bug because it boots the API
+process directly, never `docker compose up` against a clean volume.
+
 The production image (used for the hosted demo) instead defaults to
-`AI_MODE=mock` and binds to `$PORT` — see `Dockerfile`.
+`AI_MODE=mock` and binds to `$PORT` — see `Dockerfile`. That image is a
+single API process with no Postgres/Redis/Ollama alongside it, so it
+serves the legacy single-user demo endpoints only, not the v2 multi-user
+stack above.
+
+---
+
+## Backup & restore
+
+The control-plane database (`sqlstudio` in the `postgres` service — every
+account, workspace, file, connection, dashboard, and share grant) lives
+entirely in the `pgdata` named volume. There is no separate backup
+subsystem; standard `pg_dump`/`pg_restore` against the running container
+is the whole story:
+
+```bash
+# Backup — writes a single compressed file, safe to run against a live stack
+docker compose exec -T postgres pg_dump -U sqlstudio -Fc sqlstudio > backup.dump
+
+# Restore — into a FRESH stack (docker compose up postgres, before app/migrate/
+# worker/scheduler have started against it) or a deliberately wiped one
+docker compose exec -T postgres pg_restore -U sqlstudio -d sqlstudio --clean --if-exists < backup.dump
+```
+
+`pg_restore --clean --if-exists` drops existing objects before recreating
+them, so this is safe to run against a database that already has the
+schema from a prior `migrate` run — it does not need an empty database
+first. Two things a restore does **not** cover, since they live outside
+Postgres entirely: the `ollama_models` volume (pulled models — re-pull if
+lost, see the Docker section above) and any encrypted connection
+credentials' decryptability, which depends on `CONNECTION_SECRET_KEY`
+staying the same across the backup and the restore target (see
+`app/connections/crypto.py` — rotating that value permanently orphans
+every previously-stored credential, backup or not).
+
+For a full disaster-recovery story beyond the DB alone, back up the
+`pgdata` volume directory itself (`docker volume inspect
+ai-first-sql-workbench_pgdata` for its host path) rather than relying on
+`pg_dump` alone — that also covers anything Postgres-internal that a
+logical dump wouldn't (e.g. mid-flight replication state, if this were
+ever run with any). For a single-operator deployment, the `pg_dump`
+approach above is the practical default.
 
 ---
 
