@@ -117,6 +117,23 @@ jobs:
           done
           echo "::error::Backend never became healthy for e2e"; cat /tmp/backend-e2e.log; exit 1
 
+      - name: Start AI worker for e2e smoke test
+        working-directory: backend
+        env:
+          CONTROL_PLANE_DB_URL: postgresql+asyncpg://sqlstudio:sqlstudio@localhost:5432/sqlstudio
+          AI_MODE: mock
+          REDIS_URL: redis://localhost:6379/0
+          JWT_SECRET: insecure-dev-secret-change-me
+        run: |
+          # Without this, the investigate e2e test's job sits queued forever --
+          # nothing else in this workflow drains the ai_tasks queue.
+          nohup python -m app.worker > /tmp/worker-e2e.log 2>&1 &
+          for i in $(seq 1 30); do
+            grep -q "Listening on ai_tasks" /tmp/worker-e2e.log && exit 0
+            sleep 1
+          done
+          echo "::error::AI worker never came up for e2e"; cat /tmp/worker-e2e.log; exit 1
+
       - name: Start frontend dev server for e2e smoke test
         working-directory: frontend
         run: |

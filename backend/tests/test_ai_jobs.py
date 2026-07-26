@@ -1,7 +1,8 @@
 """tests/test_ai_jobs.py
 
-Phase 3 part A (v2 rebuild): the RQ job queue every AI call runs through,
-plus per-task model configuration. Uses a real Redis (skipped if
+Phase 3 parts A and B (v2 rebuild): the RQ job queue every AI call runs
+through, per-task model configuration, and the multi-step investigate
+agent built on top of it. Uses a real Redis (skipped if
 TEST_REDIS_URL/REDIS_URL isn't reachable) and RQ's SimpleWorker in burst
 mode to process queued jobs synchronously and deterministically -- no
 background worker process needed for the test itself, but this exercises
@@ -87,17 +88,73 @@ def test_invalid_task_type_is_rejected(client, auth_headers, workspace_id):
     assert r.status_code == 400
 
 
-def test_investigate_task_type_is_not_yet_creatable(client, auth_headers, workspace_id):
-    """"investigate" is a valid AiJob.task_type at the model/DB level (a
-    later phase's job function), but this phase never implemented a worker
-    function for it -- the API must reject creating one, not queue a job
-    that will sit forever with no function to process it."""
+def test_investigate_job_chains_a_followup_and_writes_a_report_file(client, auth_headers, workspace_id):
+    """The multi-step investigate agent: runs the primary question, an
+    automatic follow-up drawn from the orchestrator's own next_questions,
+    then writes a synthesis tying both together as a new file in the
+    workspace's file tree (not a separate report entity -- this project's
+    file-centric IDE identity means AI write-ups are just files, openable
+    and editable like anything else)."""
     r = client.post(
         f"/api/workspaces/{workspace_id}/ai/jobs",
-        json={"task_type": "investigate", "input": {}},
+        json={"task_type": "investigate", "input": {"question": "top users by spend"}},
         headers=auth_headers,
     )
-    assert r.status_code == 400
+    assert r.status_code == 200, r.text
+    job_id = r.json()["id"]
+
+    _run_pending_jobs()
+
+    r = client.get(f"/api/workspaces/{workspace_id}/ai/jobs/{job_id}", headers=auth_headers)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "done", body
+    assert body["result"]["file_id"]
+    assert body["result"]["summary"]
+
+    r = client.get(f"/api/workspaces/{workspace_id}/files/{body['result']['file_id']}", headers=auth_headers)
+    assert r.status_code == 200, r.text
+    file_body = r.json()
+    assert file_body["name"].startswith("Investigation - ")
+    assert "## Summary" in file_body["content"]
+    assert "## Step 1" in file_body["content"]
+
+
+def test_a_viewer_cannot_start_an_investigation_but_can_start_other_ai_tasks(client, auth_headers, workspace_id):
+    """investigate writes a new file into the workspace (unlike
+    generate/explain/repair/suggest, which only produce text) -- it needs
+    the same editor+ bar as files.routes.create_file, or a viewer could use
+    it to write files despite having no write access anywhere else."""
+    from app.db.control_plane import ControlPlaneSessionLocal
+    from app.workspaces.models import WorkspaceMembership
+    import asyncio
+
+    email = "ai-jobs-viewer@example.com"
+    client.post("/api/auth/register", json={"email": email, "password": "correcthorsebatterystaple", "display_name": "AI Jobs Viewer"})
+    r = client.post("/api/auth/jwt/login", data={"username": email, "password": "correcthorsebatterystaple"})
+    viewer_headers = {"Authorization": f"Bearer {r.json()['access_token']}"}
+    me = client.get("/api/users/me", headers=viewer_headers).json()
+
+    async def _add_viewer_membership():
+        async with ControlPlaneSessionLocal() as session:
+            session.add(WorkspaceMembership(workspace_id=workspace_id, user_id=me["id"], role="viewer"))
+            await session.commit()
+
+    asyncio.run(_add_viewer_membership())
+
+    r = client.post(
+        f"/api/workspaces/{workspace_id}/ai/jobs",
+        json={"task_type": "investigate", "input": {"question": "x"}},
+        headers=viewer_headers,
+    )
+    assert r.status_code == 403
+
+    r = client.post(
+        f"/api/workspaces/{workspace_id}/ai/jobs",
+        json={"task_type": "generate", "input": {"prompt": "x"}},
+        headers=viewer_headers,
+    )
+    assert r.status_code == 200, r.text
 
 
 def test_repair_job_uses_the_repair_task_model_route(client, auth_headers, workspace_id):

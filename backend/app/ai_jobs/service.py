@@ -9,11 +9,16 @@ from app.ai_jobs.models import AiJob
 from app.ai_jobs.queue import ai_queue
 from app.ai_jobs.tasks import run_ai_task
 
-# "investigate" is a valid AiJob.task_type at the DB level (see models.py)
-# but has no job function yet -- that's the multi-step investigate agent,
-# built on top of this queue in a later phase. Only accept task types this
-# phase actually implements a worker function for.
-CREATABLE_TASK_TYPES = {"generate", "explain", "repair", "suggest"}
+CREATABLE_TASK_TYPES = {"generate", "explain", "repair", "suggest", "investigate"}
+
+# RQ's own default (180s) is enough for a single generate/explain/repair/
+# suggest call, but investigate chains two full orchestrator runs plus a
+# synthesis call -- realistically 120-200s+ under this project's own
+# hardware findings (task #22), and sometimes past 180s. Past job_timeout,
+# RQ kills the work-horse outright (SIGKILL, no exception raised inside
+# run_ai_task), so without this override the job's row would stay "running"
+# forever with nothing to catch it and mark it failed.
+JOB_TIMEOUT_SECONDS = {"investigate": 900}
 
 
 class AiJobNotFoundError(Exception):
@@ -34,7 +39,7 @@ async def create_job(
     session.add(job)
     await session.commit()
     await session.refresh(job)
-    ai_queue.enqueue(run_ai_task, str(job.id))
+    ai_queue.enqueue(run_ai_task, str(job.id), job_timeout=JOB_TIMEOUT_SECONDS.get(task_type))
     return job
 
 

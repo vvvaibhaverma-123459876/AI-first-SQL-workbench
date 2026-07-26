@@ -183,3 +183,16 @@ export type TestConnectionResult = {
   ok: boolean
   message: string
 }
+
+export type AiJobStatus = 'queued' | 'running' | 'done' | 'failed'
+
+export type AiJob = {
+  id: string
+  task_type: string
+  status: AiJobStatus
+  result: Record<string, unknown> | null
+  error: string | null
+  created_at: string
+  started_at: string | null
+  finished_at: string | null
+}

@@ -89,3 +89,37 @@ test('create a SQLite connection and run a query against it end to end', async (
   await expect(page.getByText(/2 rows/)).toBeVisible()
   await page.screenshot({ path: 'e2e/screenshots/04-query-results.png', fullPage: true })
 })
+
+// Phase 3b: confirms the investigate agent's job-queue round trip actually
+// renders -- submit a question, poll to completion (needs the AI worker
+// running alongside the backend, see the "Start AI worker for e2e smoke
+// test" CI step), then open the report it wrote as a real file in the tree.
+test('investigate a question and open the generated report end to end', async ({ page }) => {
+  const email = `smoke-investigate-${Date.now()}@example.com`
+  const password = 'correct-horse-battery-staple'
+
+  await page.goto('/')
+  await page.getByText("Don't have an account? Create one").click()
+  await page.getByLabel('Name').fill('Smoke Test')
+  await page.getByLabel('Email').fill(email)
+  await page.getByLabel('Password').fill(password)
+  await page.getByRole('button', { name: 'Create account' }).click()
+
+  await expect(page.getByText('Workspaces')).toBeVisible({ timeout: 10_000 })
+  await page.getByRole('button', { name: /New workspace/ }).click()
+  await page.getByPlaceholder('Workspace name').fill('Investigate Workspace')
+  await page.getByRole('button', { name: 'Create' }).click()
+  await expect(page.getByText('No files yet')).toBeVisible({ timeout: 10_000 })
+
+  await page.getByRole('button', { name: 'Investigate' }).click()
+  await page.getByPlaceholder(/why did signups drop/).fill('top users by spend')
+  await page.getByRole('button', { name: 'Run Investigation' }).click()
+
+  await expect(page.getByText('done', { exact: true })).toBeVisible({ timeout: 30_000 })
+  await page.screenshot({ path: 'e2e/screenshots/05-investigate-done.png', fullPage: true })
+
+  await page.getByRole('button', { name: 'Open Report' }).click()
+  await expect(page.locator('.monaco-editor').first()).toBeVisible({ timeout: 10_000 })
+  await expect(page.locator('.monaco-editor').first()).toContainText('Investigation:')
+  await page.screenshot({ path: 'e2e/screenshots/06-investigate-report-open.png', fullPage: true })
+})

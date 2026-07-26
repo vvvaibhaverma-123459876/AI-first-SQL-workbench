@@ -160,6 +160,36 @@ Request: {prompt}
         joins = self._heuristic_join_suggestions(schema)
         return SuggestTablesResponse(suggestions=fallback[:5], join_suggestions=joins[:5], provider_fallback=fallback_reason)
 
+    def synthesize_investigation(self, question: str, findings: list[dict]) -> tuple[str, str | None]:
+        """Ties together the results of a multi-step investigation (the
+        original question plus at least one automatic follow-up) into a
+        short written report. This is the step that makes "investigate" a
+        distinct task from calling assistant/run twice: the model reads
+        both results together and writes up what they mean side by side,
+        not just what each one says in isolation."""
+        sections = []
+        for i, finding in enumerate(findings, start=1):
+            sections.append(
+                f"Step {i} question: {finding['question']}\n"
+                f"SQL used:\n{finding['sql']}\n"
+                f"Rows returned: {finding['row_count']}\n"
+                f"Sample rows: {json.dumps(finding.get('sample', []), default=str)}"
+            )
+        prompt_text = f"""
+INVESTIGATION REPORT
+
+You are a data analyst. Write a concise investigation summary (3-6 sentences,
+markdown) describing what the findings below show for this question, tying
+the steps together rather than describing them one at a time. End with one
+concrete suggested next step.
+
+Original question: {question}
+
+{chr(10).join(sections)}
+"""
+        text, fallback_reason = self._generate(prompt_text, task="investigate")
+        return text.strip(), fallback_reason
+
     def ask(self, mode: str, prompt: str | None = None, sql: str | None = None, error_message: str | None = None):
         if mode == "generate":
             sql_text, fallback_reason = self.generate_sql(prompt or "")
