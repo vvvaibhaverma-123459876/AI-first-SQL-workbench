@@ -107,3 +107,19 @@ export type AssistantMemoryItem = {
   negative_feedback: number
   updated_at: string
 }
+
+export type AuthUser = {
+  id: string
+  email: string
+  display_name: string
+  is_active: boolean
+  is_superuser: boolean
+  is_verified: boolean
+}
+
+export type Workspace = {
+  id: string
+  name: string
+  role: 'owner' | 'editor' | 'viewer'
+  created_at: string
+}

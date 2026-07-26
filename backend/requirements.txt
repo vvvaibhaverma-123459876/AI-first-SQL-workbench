@@ -11,3 +11,10 @@ pytest==8.3.3
 httpx==0.27.2
 # Optional for AI_PROVIDER=hf. Ollama mode does not need it.
 # transformers==4.45.2
+
+# v2 control-plane: auth, workspaces, multi-user Postgres backend.
+fastapi-users[sqlalchemy]==15.0.5
+asyncpg==0.30.0
+aiosqlite==0.20.0
+alembic==1.13.3
+pytest-asyncio==0.24.0

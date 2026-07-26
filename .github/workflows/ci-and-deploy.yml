@@ -8,6 +8,20 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: sqlstudio
+          POSTGRES_PASSWORD: sqlstudio
+          POSTGRES_DB: sqlstudio
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sqlstudio"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
 
@@ -23,6 +37,12 @@ jobs:
       - name: Backend tests (pytest)
         working-directory: backend
         run: python -m pytest -q
+
+      - name: Alembic migration applies cleanly to a real Postgres
+        working-directory: backend
+        env:
+          CONTROL_PLANE_DB_URL: postgresql+asyncpg://sqlstudio:sqlstudio@localhost:5432/sqlstudio
+        run: alembic upgrade head
 
       - uses: actions/setup-node@v4
         with:

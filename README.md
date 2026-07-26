@@ -72,7 +72,13 @@ cd AI-first-SQL-workbench
 ./start.sh
 ```
 
-Open **http://localhost:8000** — that's it.
+Open **http://localhost:8000**, create an account, and create a workspace —
+the v2 rebuild in progress (see `docs/` and the build plan) adds real
+accounts and workspaces ahead of everything else. From the empty workspace
+shell, **Open legacy demo workbench** still gives you the original
+single-user SQL demo against the bundled sample database while the
+workspace-native file/connection experience is being built out phase by
+phase.
 
 `start.sh` handles everything automatically:
 - creates the Python virtual environment
@@ -80,7 +86,9 @@ Open **http://localhost:8000** — that's it.
 - detects your installed Ollama model
 - builds the React frontend
 - seeds the demo analytics database
-- starts the server
+- starts the server (a local SQLite file backs the new accounts/workspaces
+  control plane by default — see `docker-compose.yml` for the full
+  Postgres/Redis/Ollama self-hosted stack)
 
 > **Requires:** Python 3.11+, Node.js 18+, [Ollama](https://ollama.com) with any model installed (`mistral:7b`, `qwen2.5-coder:7b`, `llama3`, etc.)
 

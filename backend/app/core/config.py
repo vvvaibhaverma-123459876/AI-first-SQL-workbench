@@ -13,6 +13,13 @@ BACKEND_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = BACKEND_ROOT / "data"
 DEFAULT_ANALYTICS_DB_URL = f"sqlite:///{(DATA_DIR / 'demo_analytics.db').as_posix()}"
 DEFAULT_METADATA_DB_URL = f"sqlite:///{(DATA_DIR / 'app_metadata.db').as_posix()}"
+# v2 control plane (users, workspaces, memberships, audit log) — async engine.
+# Defaults to a local aiosqlite file so a fresh clone with no Postgres running
+# still boots; docker-compose and any real deployment set CONTROL_PLANE_DB_URL
+# to a postgresql+asyncpg:// URL instead. SQLite is fine for a single
+# developer poking at it, but does not hold up under concurrent multi-user
+# writes, which is the whole point of the control plane existing.
+DEFAULT_CONTROL_PLANE_DB_URL = f"sqlite+aiosqlite:///{(DATA_DIR / 'control_plane.db').as_posix()}"
 
 
 class Settings(BaseSettings):
@@ -24,6 +31,14 @@ class Settings(BaseSettings):
 
     analytics_db_url: str = Field(default=DEFAULT_ANALYTICS_DB_URL, alias="ANALYTICS_DB_URL")
     metadata_db_url: str = Field(default=DEFAULT_METADATA_DB_URL, alias="METADATA_DB_URL")
+    control_plane_db_url: str = Field(default=DEFAULT_CONTROL_PLANE_DB_URL, alias="CONTROL_PLANE_DB_URL")
+    redis_url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
+
+    # Auth. The default is only safe for local single-developer use (the same
+    # posture as the rest of this app's "no .env means it still boots"
+    # philosophy) — any real multi-user deployment must set a real secret.
+    jwt_secret: str = Field(default="insecure-dev-secret-change-me", alias="JWT_SECRET")
+    jwt_lifetime_seconds: int = Field(default=3600 * 24 * 7, alias="JWT_LIFETIME_SECONDS")
 
     ai_provider: str = Field(default="ollama", alias="AI_PROVIDER")
     # AI_MODE is the newer, deploy-facing name (ollama|mock) and takes
