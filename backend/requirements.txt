@@ -36,3 +36,8 @@ pymysql==1.2.0
 # snowflake-sqlalchemy==1.11.0
 # sqlalchemy-bigquery==1.17.0
 # databricks-sqlalchemy==2.0.10
+
+# v2 Phase 3: RQ worker so AI calls (10-100s+ each, measured empirically)
+# run off the request path instead of blocking a FastAPI route.
+rq==2.10.0
+redis==8.0.1

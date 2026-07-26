@@ -6,6 +6,7 @@ import logging
 import re
 
 from app.api.schemas import ExplainSQLResponse, RepairSQLResponse, SQLExecutionResponse, SuggestTablesResponse, TableSuggestion
+from app.core.config import get_settings
 from app.llm.providers import MockProvider, get_provider
 from app.services.schema_service import SchemaService
 from app.utils.schema_text import schema_to_prompt_text
@@ -22,13 +23,19 @@ class AIService:
     def status(self) -> dict:
         return self.provider.status()
 
-    def _generate(self, prompt_text: str) -> tuple[str, str | None]:
+    def _generate(self, prompt_text: str, *, task: str) -> tuple[str, str | None]:
         """Returns (text, fallback_reason). fallback_reason is None on the
         happy path and a human-readable explanation whenever the real
         provider failed and mock output was substituted instead — callers
-        must surface this to the user rather than silently swallowing it."""
+        must surface this to the user rather than silently swallowing it.
+
+        task is one of generate|explain|repair|suggest|investigate --
+        resolved to a concrete model via Settings.model_for_task(), so every
+        caller (the legacy v1 endpoints included) gets task-appropriate
+        model routing without needing to know or pass a model themselves."""
+        model = get_settings().model_for_task(task)
         try:
-            return self.provider.generate(prompt_text), None
+            return self.provider.generate(prompt_text, model=model), None
         except Exception as exc:
             reason = f"{self.provider.provider_name} provider failed ({exc}); used local mock fallback instead."
             logger.warning("AI provider fallback: %s", reason)
@@ -53,7 +60,7 @@ Schema:
 
 Business question: {prompt}
 """
-        raw, fallback_reason = self._generate(prompt_text)
+        raw, fallback_reason = self._generate(prompt_text, task="generate")
         return self._strip_code_fences(raw), fallback_reason
 
     def explain_sql(self, sql: str) -> ExplainSQLResponse:
@@ -67,7 +74,7 @@ SQL:
 {sql}
 ```
 """
-        explanation, fallback_reason = self._generate(prompt_text)
+        explanation, fallback_reason = self._generate(prompt_text, task="explain")
         return ExplainSQLResponse(explanation=explanation, provider_fallback=fallback_reason)
 
     def explain_result(self, question: str, sql: str, result: SQLExecutionResponse) -> tuple[str, str | None]:
@@ -87,7 +94,7 @@ Row count: {result.row_count}
 Sample rows JSON:
 {json.dumps(sample_rows, default=str)}
 """
-        text, fallback_reason = self._generate(prompt_text)
+        text, fallback_reason = self._generate(prompt_text, task="explain")
         return text.strip(), fallback_reason
 
     def repair_sql(self, sql: str, error_message: str = "") -> RepairSQLResponse:
@@ -105,7 +112,7 @@ SQL:
 {sql}
 ```
 """
-        raw, fallback_reason = self._generate(prompt_text)
+        raw, fallback_reason = self._generate(prompt_text, task="repair")
         repaired = self._strip_code_fences(raw)
         if self._normalize_sql(repaired) == self._normalize_sql(sql):
             rationale = "No automatic correction could be generated; the original SQL was returned unchanged. Please review the query manually."
@@ -125,7 +132,7 @@ Schema:
 {schema_to_prompt_text(schema)}
 Request: {prompt}
 """
-        raw, fallback_reason = self._generate(prompt_text)
+        raw, fallback_reason = self._generate(prompt_text, task="suggest")
         try:
             payload = json.loads(self._extract_json(raw))
             suggestions = [TableSuggestion(**item) for item in payload.get("suggestions", [])]

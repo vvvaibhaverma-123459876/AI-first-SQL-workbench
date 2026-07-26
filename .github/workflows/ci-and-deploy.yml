@@ -36,6 +36,15 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
 
@@ -62,6 +71,10 @@ jobs:
           # root/sqlstudio db, since the connector layer's own MySQL config
           # fields are what's under test, not any particular user account.
           TEST_MYSQL_URL: mysql+pymysql://root:root@localhost:3306/sqlstudio
+          # Real Redis for the ai_jobs test suite (app/ai_jobs) -- RQ's
+          # SimpleWorker runs jobs synchronously in-process against it, no
+          # separate worker process needed for tests.
+          REDIS_URL: redis://localhost:6379/0
         run: python -m pytest -q
 
       - name: Alembic migration applies cleanly to a real Postgres
