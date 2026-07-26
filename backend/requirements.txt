@@ -18,3 +18,21 @@ asyncpg==0.30.0
 aiosqlite==0.20.0
 alembic==1.13.3
 pytest-asyncio==0.24.0
+
+# v2 data connectors: Postgres and MySQL are live-tested in this project's
+# own test suite (test_connections.py) against real Docker containers.
+cryptography==49.0.0
+psycopg2-binary==2.9.12
+pymysql==1.2.0
+# SQLite needs no extra driver (stdlib). Snowflake, BigQuery, and Databricks
+# are implemented against their standard SQLAlchemy dialects in
+# app/connections/drivers.py but are NOT installed by default: none can be
+# live-tested without a real cloud account (none exists in this project's
+# dev/CI environment), and each pulls a large, independent dependency tree
+# (boto3, grpcio, pyarrow) that would slow every install and widen the
+# version-conflict surface for a codebase pinned this tightly, for a code
+# path nobody is running by default. Uncomment the one(s) you actually use --
+# no code changes needed, drivers.py imports them lazily on first use.
+# snowflake-sqlalchemy==1.11.0
+# sqlalchemy-bigquery==1.17.0
+# databricks-sqlalchemy==2.0.10

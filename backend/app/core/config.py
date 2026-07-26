@@ -40,6 +40,15 @@ class Settings(BaseSettings):
     jwt_secret: str = Field(default="insecure-dev-secret-change-me", alias="JWT_SECRET")
     jwt_lifetime_seconds: int = Field(default=3600 * 24 * 7, alias="JWT_LIFETIME_SECONDS")
 
+    # Encrypts data-connection credentials (passwords, tokens, service-account
+    # keys) at rest in the control-plane DB. Must be a FIXED value across
+    # restarts -- a random-per-boot key would permanently orphan every stored
+    # credential the moment the process restarts. Same "insecure but stable"
+    # posture as jwt_secret: fine for local single-developer use, must be
+    # overridden with a real secret for any shared deployment. Rotating this
+    # value orphans existing stored credentials (they become undecryptable).
+    connection_secret_key: str = Field(default="insecure-dev-connection-key-change-me", alias="CONNECTION_SECRET_KEY")
+
     ai_provider: str = Field(default="ollama", alias="AI_PROVIDER")
     # AI_MODE is the newer, deploy-facing name (ollama|mock) and takes
     # precedence when set; AI_PROVIDER (which also accepts hf/huggingface) is
