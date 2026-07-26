@@ -123,3 +123,27 @@ export type Workspace = {
   role: 'owner' | 'editor' | 'viewer'
   created_at: string
 }
+
+export type FileNode = {
+  id: string
+  parent_id: string | null
+  name: string
+  is_folder: boolean
+  updated_at: string
+}
+
+export type FileDetail = FileNode & {
+  content: string
+}
+
+export type FileRevision = {
+  id: string
+  content: string
+  created_at: string
+}
+
+export type FileSearchResult = {
+  file_id: string
+  name: string
+  snippet: string
+}
