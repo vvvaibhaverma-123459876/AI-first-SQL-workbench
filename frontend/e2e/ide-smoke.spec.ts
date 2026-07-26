@@ -139,3 +139,98 @@ test('investigate a question against a real connection and open the generated re
   await expect(page.locator('.monaco-editor').first()).toContainText('widgets')
   await page.screenshot({ path: 'e2e/screenshots/06-investigate-report-open.png', fullPage: true })
 })
+
+// Phase 4a: the literal acceptance bar for this phase is "a dashboard with
+// 3+ pinned charts persists and reloads correctly" -- pins 3 tiles from
+// real query results (not by calling the API directly) via the "Pin to
+// dashboard" flow, then does a full page.reload() and confirms all 3 still
+// render with real data, not just that the dashboard row exists.
+test('pin 3 charts to a dashboard from real query results and confirm they persist across a reload', async ({ page }) => {
+  const sqlitePath = process.env.PLAYWRIGHT_SQLITE_FIXTURE
+  test.skip(!sqlitePath, 'PLAYWRIGHT_SQLITE_FIXTURE not set')
+
+  const email = `smoke-dashboard-${Date.now()}@example.com`
+  const password = 'correct-horse-battery-staple'
+  const dashboardName = `Widgets Dashboard ${Date.now()}`
+
+  await page.goto('/')
+  await page.getByText("Don't have an account? Create one").click()
+  await page.getByLabel('Name').fill('Smoke Test')
+  await page.getByLabel('Email').fill(email)
+  await page.getByLabel('Password').fill(password)
+  await page.getByRole('button', { name: 'Create account' }).click()
+
+  await expect(page.getByText('Workspaces')).toBeVisible({ timeout: 10_000 })
+  await page.getByRole('button', { name: /New workspace/ }).click()
+  await page.getByPlaceholder('Workspace name').fill('Dashboard Workspace')
+  await page.getByRole('button', { name: 'Create' }).click()
+  await expect(page.getByText('No files yet')).toBeVisible({ timeout: 10_000 })
+
+  await page.getByRole('button', { name: 'Connections' }).click()
+  await page.getByTitle('New connection').click()
+  await page.getByPlaceholder('Connection name').fill('widgets-db')
+  await page.locator('select').selectOption('sqlite')
+  await page.getByPlaceholder('File path (on the server)').fill(sqlitePath!)
+  await page.getByRole('button', { name: 'Create' }).click()
+  await expect(page.getByText('widgets-db')).toBeVisible({ timeout: 10_000 })
+
+  page.once('dialog', (dialog) => dialog.accept('query.sql'))
+  await page.getByRole('button', { name: 'Files' }).click()
+  await page.getByTitle('New file').first().click()
+  await expect(page.locator('.monaco-editor').first()).toBeVisible({ timeout: 10_000 })
+  await page.locator('.monaco-editor').first().click()
+  await page.keyboard.type('select * from widgets order by id')
+  await page.getByRole('button', { name: 'Run' }).click()
+  // Shares the same PLAYWRIGHT_SQLITE_FIXTURE as every other test in this
+  // file -- CI's own seeding step (and this one) inserts exactly 2 rows.
+  await expect(page.getByText(/2 rows/)).toBeVisible({ timeout: 10_000 })
+
+  const pinTile = async (title: string, createNewDashboard: boolean) => {
+    await page.getByTitle('Pin to dashboard').click()
+    await page.getByPlaceholder('Tile title').fill(title)
+    if (createNewDashboard) {
+      await page.getByLabel('New dashboard').check()
+      await page.getByPlaceholder('Dashboard name').fill(dashboardName)
+    } else {
+      await page.getByLabel('Existing dashboard').check()
+      await page.locator('select').last().selectOption({ label: dashboardName })
+    }
+    await page.getByRole('button', { name: 'Pin to dashboard' }).click()
+    // Not a button-text check: the submit button's own accessible name
+    // changes to "Pinning…" the instant the click fires, well before the
+    // create-dashboard + add-item round trip actually finishes, so
+    // asserting on that name disappearing passes prematurely -- checking
+    // the tile-title input itself is gone is what actually proves the
+    // menu (and its state) has closed, not just that its label changed.
+    await expect(page.getByPlaceholder('Tile title')).toHaveCount(0, { timeout: 10_000 })
+  }
+
+  await pinTile('Widget rows', true)
+  await pinTile('Widget rows again', false)
+  await pinTile('Widget rows once more', false)
+
+  await page.screenshot({ path: 'e2e/screenshots/07-dashboard-pinned.png', fullPage: true })
+
+  await page.getByRole('button', { name: 'Dashboards' }).click()
+  await expect(page.getByText(dashboardName)).toBeVisible({ timeout: 10_000 })
+  await page.getByText(dashboardName).click()
+  await expect(page.getByText('Widget rows', { exact: true })).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByText('Widget rows again')).toBeVisible()
+  await expect(page.getByText('Widget rows once more')).toBeVisible()
+  await expect(page.getByText('alpha').first()).toBeVisible({ timeout: 10_000 })
+  await page.screenshot({ path: 'e2e/screenshots/08-dashboard-open.png', fullPage: true })
+
+  // The actual acceptance bar: reload the page entirely and confirm the
+  // same 3 tiles come back with real data, not just that the dashboard
+  // metadata row survived. The active workspace is remembered across a
+  // reload (useAuthStore persists it), so this lands straight back in the
+  // IDE shell rather than the workspace picker.
+  await page.reload()
+  await page.getByRole('button', { name: 'Dashboards' }).click({ timeout: 10_000 })
+  await page.getByText(dashboardName).click()
+  await expect(page.getByText('Widget rows', { exact: true })).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByText('Widget rows again')).toBeVisible()
+  await expect(page.getByText('Widget rows once more')).toBeVisible()
+  await expect(page.getByText('alpha').first()).toBeVisible({ timeout: 10_000 })
+  await page.screenshot({ path: 'e2e/screenshots/09-dashboard-reloaded.png', fullPage: true })
+})

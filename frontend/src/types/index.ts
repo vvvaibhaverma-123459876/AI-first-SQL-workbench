@@ -196,3 +196,30 @@ export type AiJob = {
   started_at: string | null
   finished_at: string | null
 }
+
+export type ChartType = 'table' | 'bar' | 'line' | 'pie' | 'scatter'
+
+export type Dashboard = {
+  id: string
+  name: string
+  created_at: string
+  updated_at: string
+}
+
+export type DashboardItem = {
+  id: string
+  dashboard_id: string
+  connection_id: string
+  title: string
+  sql: string
+  chart_type: ChartType
+  x_field: string | null
+  y_fields: string[]
+  width: number
+  sort_order: number
+  created_at: string
+}
+
+export type DashboardDetail = Dashboard & {
+  items: DashboardItem[]
+}
