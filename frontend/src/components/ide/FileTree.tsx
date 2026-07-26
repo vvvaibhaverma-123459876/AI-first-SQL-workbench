@@ -1,7 +1,8 @@
-import { ChevronDown, ChevronRight, File, Folder, FolderPlus, FilePlus, Trash2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, File, Folder, FolderPlus, FilePlus, Share2, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { useFileStore } from '../../store/useFileStore'
 import type { FileNode } from '../../types'
+import { ShareDialog } from './ShareDialog'
 
 function children(files: FileNode[], parentId: string | null): FileNode[] {
   return files.filter((f) => f.parent_id === parentId)
@@ -10,6 +11,7 @@ function children(files: FileNode[], parentId: string | null): FileNode[] {
 function TreeNode({ workspaceId, node, depth }: { workspaceId: string; node: FileNode; depth: number }) {
   const { files, openFile, activeTabId, deleteFile, createFile } = useFileStore()
   const [expanded, setExpanded] = useState(true)
+  const [sharing, setSharing] = useState(false)
   const kids = node.is_folder ? children(files, node.id) : []
 
   const handleClick = () => {
@@ -57,12 +59,18 @@ function TreeNode({ workspaceId, node, depth }: { workspaceId: string; node: Fil
               </button>
             </>
           )}
+          {!node.is_folder && (
+            <button className="!border-0 !bg-transparent !p-0.5" title="Share" onClick={(e) => { e.stopPropagation(); setSharing(true) }}>
+              <Share2 size={12} />
+            </button>
+          )}
           <button className="!border-0 !bg-transparent !p-0.5 hover:!text-rose-400" title="Delete" onClick={handleDelete}>
             <Trash2 size={12} />
           </button>
         </span>
       </div>
       {node.is_folder && expanded && kids.map((child) => <TreeNode key={child.id} workspaceId={workspaceId} node={child} depth={depth + 1} />)}
+      {sharing && <ShareDialog workspaceId={workspaceId} resourceType="file" resourceId={node.id} resourceName={node.name} onClose={() => setSharing(false)} />}
     </div>
   )
 }

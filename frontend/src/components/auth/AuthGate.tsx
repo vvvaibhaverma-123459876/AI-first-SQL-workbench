@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { LogOut, Plus } from 'lucide-react'
 import { useAuthStore } from '../../store/useAuthStore'
+import { useSharingStore } from '../../store/useSharingStore'
+import { SharedResourceView } from '../shared/SharedResourceView'
 
 function LoginForm() {
   const { login, register, error } = useAuthStore()
@@ -64,8 +66,13 @@ function LoginForm() {
 
 function WorkspacePicker() {
   const { workspaces, activeWorkspaceId, setActiveWorkspace, createWorkspace, user, logout } = useAuthStore()
+  const { sharedWithMe, loadSharedWithMe, openShared } = useSharingStore()
   const [creating, setCreating] = useState(false)
   const [name, setName] = useState('')
+
+  useEffect(() => {
+    loadSharedWithMe()
+  }, [loadSharedWithMe])
 
   const submitCreate = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -114,6 +121,22 @@ function WorkspacePicker() {
             <Plus size={14} className="mr-1 inline" />New workspace
           </button>
         )}
+
+        {sharedWithMe.length > 0 && (
+          <div className="mt-6 border-t border-slate-800 pt-4">
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Shared with me</div>
+            <div className="space-y-2">
+              {sharedWithMe.map((s) => (
+                <button key={s.share_id} className="w-full !justify-start !bg-slate-800/60 text-left" onClick={() => openShared(s)}>
+                  <span className="font-medium">{s.resource_name}</span>
+                  <span className="muted ml-2 text-xs uppercase tracking-wide">
+                    {s.resource_type} · {s.role}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -121,6 +144,7 @@ function WorkspacePicker() {
 
 export function AuthGate({ children }: { children: React.ReactNode }) {
   const { status, bootstrap, activeWorkspaceId, workspaces } = useAuthStore()
+  const activeShare = useSharingStore((s) => s.activeShare)
 
   useEffect(() => {
     bootstrap()
@@ -131,6 +155,13 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   }
   if (status === 'signed_out') {
     return <LoginForm />
+  }
+  // Checked BEFORE the workspace picker: a shared resource is reachable
+  // even for a signed-in user with no workspace of their own at all --
+  // sharing is additive and orthogonal to workspace membership (see
+  // sql-studio-v2-rebuild memory / the Phase 5a design decision).
+  if (activeShare) {
+    return <SharedResourceView />
   }
   if (!activeWorkspaceId || !workspaces.some((w) => w.id === activeWorkspaceId)) {
     return <WorkspacePicker />

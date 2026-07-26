@@ -244,3 +244,47 @@ export type ScheduledQuery = {
   last_notified_at: string | null
   created_at: string
 }
+
+export type ShareRole = 'viewer' | 'editor'
+
+export type Share = {
+  id: string
+  shared_with_email: string
+  role: ShareRole
+  created_at: string
+}
+
+export type SharedResourceSummary = {
+  share_id: string
+  resource_type: 'file' | 'dashboard'
+  resource_id: string
+  resource_name: string
+  workspace_id: string
+  role: ShareRole
+  created_at: string
+}
+
+export type SharedFile = {
+  id: string
+  name: string
+  content: string
+  role: ShareRole
+}
+
+export type SharedDashboardItem = {
+  id: string
+  title: string
+  sql: string
+  chart_type: ChartType
+  x_field: string | null
+  y_fields: string[]
+  width: number
+  sort_order: number
+}
+
+export type SharedDashboard = {
+  id: string
+  name: string
+  role: ShareRole
+  items: SharedDashboardItem[]
+}
