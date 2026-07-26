@@ -41,3 +41,9 @@ pymysql==1.2.0
 # run off the request path instead of blocking a FastAPI route.
 rq==2.10.0
 redis==8.0.1
+
+# v2 Phase 3d: pgvector-backed per-connection schema embeddings for
+# semantic table retrieval (replaces keyword matching in suggest_tables()
+# when a real connection is attached). Needs the pgvector Postgres
+# extension too -- see docker-compose.yml's postgres image.
+pgvector==0.5.0

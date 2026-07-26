@@ -4,12 +4,23 @@ from __future__ import annotations
 import json
 import logging
 import re
+from typing import TYPE_CHECKING
 
 from app.api.schemas import ExplainSQLResponse, RepairSQLResponse, SchemaResponse, SQLExecutionResponse, SuggestTablesResponse, TableSuggestion
 from app.core.config import get_settings
 from app.llm.providers import MockProvider, get_provider
 from app.services.schema_service import SchemaService
 from app.utils.schema_text import schema_to_prompt_text
+
+if TYPE_CHECKING:
+    # Deferred to TYPE_CHECKING only, never imported at runtime here: this
+    # module is reachable from test files that don't always import
+    # app.main (and therefore app.auth.models) first, and DataConnection's
+    # own GUID import trips fastapi-users-db-sqlalchemy 7.0.0's import-
+    # order bug if it lands before app.auth.models does (see alembic/env.py
+    # for the full explanation -- this is the same bug class, bite #5's
+    # near-miss, avoided rather than fixed here).
+    from app.connections.models import DataConnection
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +147,11 @@ SQL:
             rationale = "Generated a safer or syntactically corrected read-only SQL statement."
         return RepairSQLResponse(repaired_sql=repaired, rationale=rationale, provider_fallback=fallback_reason)
 
-    def suggest_tables(self, prompt: str, schema: SchemaResponse | None = None) -> SuggestTablesResponse:
+    def suggest_tables(self, prompt: str, schema: SchemaResponse | None = None, connection: DataConnection | None = None) -> SuggestTablesResponse:
+        if connection is not None:
+            via_embeddings = self._suggest_tables_via_embeddings(prompt, connection, schema)
+            if via_embeddings is not None:
+                return via_embeddings
         schema = schema or self.schema_service.get_schema()
         prompt_text = f"""
 Suggest relevant tables for this analyst request.
@@ -175,6 +190,48 @@ Request: {prompt}
             fallback = [TableSuggestion(table_name=table.name, reason="Included as general schema context.", suggested_columns=[c.name for c in table.columns[:5]]) for table in schema.tables[:3]]
         joins = self._heuristic_join_suggestions(schema)
         return SuggestTablesResponse(suggestions=fallback[:5], join_suggestions=joins[:5], provider_fallback=fallback_reason)
+
+    def _suggest_tables_via_embeddings(self, prompt: str, connection: DataConnection, schema: SchemaResponse | None) -> SuggestTablesResponse | None:
+        """Deterministic, cheaper alternative to the LLM-based suggestion
+        call above: ranks this connection's real tables by cosine
+        similarity to the question instead of asking the model to guess.
+        Returns None (not a fallback response) whenever embeddings aren't
+        usable here -- mock AI mode, an unreachable embedding model, or a
+        connection with no schema -- so the caller falls through to the
+        existing LLM+keyword path and surfaces that as normal.
+
+        Imports are local, not top-of-module: this module is reachable
+        from test files that don't always import app.main (and therefore
+        app.auth.models) first, and embedding_models.SchemaEmbedding's own
+        GUID import trips fastapi-users-db-sqlalchemy's import-order bug if
+        it lands first. Deferred past every test's client-fixture import of
+        app.main sidesteps that entirely -- see the TYPE_CHECKING note atop
+        this file for the same bug class."""
+        if schema is None:
+            return None
+        from app.connections.embedding_service import ensure_embeddings, find_relevant_tables
+        from app.db.control_plane_sync import get_sync_session
+
+        session = get_sync_session()
+        try:
+            provider_name = self.provider.provider_name
+            ready = ensure_embeddings(session, workspace_id=connection.workspace_id, connection_id=connection.id, schema=schema, provider_name=provider_name)
+            if not ready:
+                return None
+            hits = find_relevant_tables(session, connection_id=connection.id, question=prompt, provider_name=provider_name, top_k=5)
+            if not hits:
+                return None
+            suggestions = [
+                TableSuggestion(
+                    table_name=hit.table_name,
+                    reason=f"Semantically relevant to this question (embedding-ranked, {self.provider.provider_name}/{get_settings().schema_embedding_model}).",
+                    suggested_columns=list(hit.column_names)[:8],
+                )
+                for hit in hits
+            ]
+            return SuggestTablesResponse(suggestions=suggestions, join_suggestions=self._heuristic_join_suggestions(schema)[:5], provider_fallback=None)
+        finally:
+            session.close()
 
     def synthesize_investigation(self, question: str, findings: list[dict]) -> tuple[str, str | None]:
         """Ties together the results of a multi-step investigation (the

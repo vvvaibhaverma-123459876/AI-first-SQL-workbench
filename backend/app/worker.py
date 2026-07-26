@@ -20,6 +20,7 @@ from rq import Worker
 from app.auth.models import User  # noqa: E402,F401
 
 from app.ai_jobs.models import AiJob  # noqa: E402,F401
+from app.connections.embedding_models import SchemaEmbedding  # noqa: E402,F401
 from app.connections.models import DataConnection  # noqa: E402,F401
 from app.files.models import File, FileRevision  # noqa: E402,F401
 from app.workspaces.models import AuditLogEntry, Workspace, WorkspaceMembership  # noqa: E402,F401

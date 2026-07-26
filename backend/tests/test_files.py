@@ -185,8 +185,15 @@ def test_delete_nonempty_folder_with_revisions_on_real_postgres():
     from app.workspaces.models import Workspace, WorkspaceMembership
 
     async def _run():
+        from sqlalchemy import text
+
         engine = create_async_engine(postgres_url, future=True)
         async with engine.begin() as conn:
+            # Phase 3d's schema_embeddings table (now part of
+            # ControlPlaneBase.metadata) needs the pgvector extension --
+            # per-database, not per-cluster, so this test's own scratch
+            # create_all needs it too, same as test_schema_embeddings.py.
+            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
             await conn.run_sync(ControlPlaneBase.metadata.create_all)
         session_factory = async_sessionmaker(engine, expire_on_commit=False)
 

@@ -79,6 +79,22 @@ class Settings(BaseSettings):
     ollama_investigate_model: str | None = Field(default=None, alias="OLLAMA_INVESTIGATE_MODEL")
     hf_model: str = Field(default="google/flan-t5-base", alias="HF_MODEL")
 
+    # Phase 3d: pgvector-backed schema embeddings, per real connection.
+    # nomic-embed-text is the only model this has been empirically verified
+    # against (768-dim, cosine-similarity sanity check confirmed it ranks
+    # semantically relevant tables above irrelevant ones -- see
+    # sql-studio-v2-rebuild memory). Changing this to a different-dim model
+    # requires an Alembic migration (Vector(768) is hardcoded in
+    # connections/embedding_models.py), not just this config flip.
+    schema_embedding_model: str = Field(default="nomic-embed-text", alias="OLLAMA_EMBEDDING_MODEL")
+    # Bounds first-use lazy embedding compute per connection so a very large
+    # warehouse schema can't stall an RQ job past its timeout (every real
+    # call site for this runs inside the worker, never a live request --
+    # see connections/embedding_service.py). Tables beyond this count are
+    # left un-embedded and never surface via semantic suggestion until a
+    # manual refresh.
+    schema_embedding_max_tables: int = Field(default=100, alias="SCHEMA_EMBEDDING_MAX_TABLES")
+
     default_row_limit: int = Field(default=200, alias="DEFAULT_ROW_LIMIT")
     default_sql_limit: int = Field(default=200, alias="DEFAULT_SQL_LIMIT")
     assistant_cache_enabled: bool = Field(default=True, alias="ASSISTANT_CACHE_ENABLED")
