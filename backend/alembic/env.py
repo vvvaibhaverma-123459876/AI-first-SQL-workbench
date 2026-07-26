@@ -29,6 +29,7 @@ from app.core.config import get_settings  # noqa: E402
 from app.dashboards.models import Dashboard, DashboardItem  # noqa: E402,F401
 from app.db.control_plane import ControlPlaneBase  # noqa: E402
 from app.files.models import File, FileRevision  # noqa: E402,F401
+from app.scheduled_queries.models import ScheduledQuery  # noqa: E402,F401
 from app.workspaces.models import AuditLogEntry, Workspace, WorkspaceMembership  # noqa: E402,F401
 
 # this is the Alembic Config object, which provides

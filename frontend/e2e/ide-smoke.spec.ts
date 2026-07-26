@@ -234,3 +234,63 @@ test('pin 3 charts to a dashboard from real query results and confirm they persi
   await expect(page.getByText('alpha').first()).toBeVisible({ timeout: 10_000 })
   await page.screenshot({ path: 'e2e/screenshots/09-dashboard-reloaded.png', fullPage: true })
 })
+
+// Phase 4b: the cron-firing correctness itself is proven at the pytest
+// level (tick()/webhook tests against real Redis and a real local HTTP
+// listener -- see tests/test_scheduled_queries.py), not by waiting on a
+// live cron here. This just confirms the panel itself actually renders
+// and the "run now" round trip (create -> run -> real row count back)
+// works through the real UI, the same "does this actually render" bar
+// every other phase's UI has been held to.
+test('create a scheduled query and confirm "run now" reports a real result', async ({ page }) => {
+  const sqlitePath = process.env.PLAYWRIGHT_SQLITE_FIXTURE
+  test.skip(!sqlitePath, 'PLAYWRIGHT_SQLITE_FIXTURE not set')
+
+  const email = `smoke-scheduled-${Date.now()}@example.com`
+  const password = 'correct-horse-battery-staple'
+
+  await page.goto('/')
+  await page.getByText("Don't have an account? Create one").click()
+  await page.getByLabel('Name').fill('Smoke Test')
+  await page.getByLabel('Email').fill(email)
+  await page.getByLabel('Password').fill(password)
+  await page.getByRole('button', { name: 'Create account' }).click()
+
+  await expect(page.getByText('Workspaces')).toBeVisible({ timeout: 10_000 })
+  await page.getByRole('button', { name: /New workspace/ }).click()
+  await page.getByPlaceholder('Workspace name').fill('Scheduled Workspace')
+  await page.getByRole('button', { name: 'Create' }).click()
+  await expect(page.getByText('No files yet')).toBeVisible({ timeout: 10_000 })
+
+  await page.getByRole('button', { name: 'Connections' }).click()
+  await page.getByTitle('New connection').click()
+  await page.getByPlaceholder('Connection name').fill('widgets-db')
+  await page.locator('select').selectOption('sqlite')
+  await page.getByPlaceholder('File path (on the server)').fill(sqlitePath!)
+  await page.getByRole('button', { name: 'Create' }).click()
+  await expect(page.getByText('widgets-db')).toBeVisible({ timeout: 10_000 })
+
+  await page.getByRole('button', { name: 'Scheduled' }).click()
+  await page.getByTitle('New scheduled query').click()
+  await page.getByPlaceholder('Schedule name').fill('Widget count check')
+  // No connection picker interaction needed: the form auto-selects the
+  // first available connection once loadConnections() resolves, and this
+  // workspace only has the one ("widgets-db") -- confirmed already
+  // selected by default in the rendered form.
+  await page.getByPlaceholder(/SELECT/).fill('select * from widgets')
+  await page.getByPlaceholder(/Cron expression/).fill('0 * * * *')
+  await page.getByRole('button', { name: 'Create' }).click()
+  await expect(page.getByText('Widget count check')).toBeVisible({ timeout: 10_000 })
+  await page.screenshot({ path: 'e2e/screenshots/10-scheduled-created.png', fullPage: true })
+
+  // "Run now" only renders (group-hover:flex on a `hidden` parent, i.e.
+  // display:none until then) once the row itself is hovered -- Playwright's
+  // click() moves the mouse to the target first, but a display:none
+  // element has no box to move to, so the row's own :hover has to be
+  // triggered explicitly before the button becomes clickable.
+  await page.getByText('Widget count check').hover()
+  await page.getByTitle('Run now').click()
+  await expect(page.getByText(/no webhook\/email configured/)).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByText(/\(2 rows\)/)).toBeVisible()
+  await page.screenshot({ path: 'e2e/screenshots/11-scheduled-run-now.png', fullPage: true })
+})

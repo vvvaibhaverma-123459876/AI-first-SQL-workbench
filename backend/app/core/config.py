@@ -95,6 +95,18 @@ class Settings(BaseSettings):
     # manual refresh.
     schema_embedding_max_tables: int = Field(default=100, alias="SCHEMA_EMBEDDING_MAX_TABLES")
 
+    # Phase 4b: scheduled query email notification. Optional and unset by
+    # default -- there is no SMTP infra bundled with this project (no mail
+    # server in docker-compose.yml), so a scheduled query with only
+    # notify_email set and no SMTP configured reports that visibly
+    # (last_status = "email not configured...") rather than silently
+    # no-op-ing or crashing.
+    smtp_host: str | None = Field(default=None, alias="SMTP_HOST")
+    smtp_port: int = Field(default=587, alias="SMTP_PORT")
+    smtp_username: str | None = Field(default=None, alias="SMTP_USERNAME")
+    smtp_password: str | None = Field(default=None, alias="SMTP_PASSWORD")
+    smtp_from_address: str | None = Field(default=None, alias="SMTP_FROM_ADDRESS")
+
     default_row_limit: int = Field(default=200, alias="DEFAULT_ROW_LIMIT")
     default_sql_limit: int = Field(default=200, alias="DEFAULT_SQL_LIMIT")
     assistant_cache_enabled: bool = Field(default=True, alias="ASSISTANT_CACHE_ENABLED")
