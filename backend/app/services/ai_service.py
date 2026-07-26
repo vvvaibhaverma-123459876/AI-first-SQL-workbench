@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from app.api.schemas import ExplainSQLResponse, RepairSQLResponse, SchemaResponse, SQLExecutionResponse, SuggestTablesResponse, TableSuggestion
 from app.core.config import get_settings
 from app.llm.providers import MockProvider, get_provider
+from app.observability.metrics import record_ai_call
 from app.services.schema_service import SchemaService
 from app.utils.schema_text import schema_to_prompt_text
 
@@ -62,11 +63,13 @@ class AIService:
         model routing without needing to know or pass a model themselves."""
         model = get_settings().model_for_task(task)
         try:
-            return self.provider.generate(prompt_text, model=model), None
+            result = self.provider.generate(prompt_text, model=model), None
         except Exception as exc:
             reason = f"{self.provider.provider_name} provider failed ({exc}); used local mock fallback instead."
             logger.warning("AI provider fallback: %s", reason)
-            return self.fallback.generate(f"{prompt_text}\n\nProvider failure fallback reason: {exc}"), reason
+            result = self.fallback.generate(f"{prompt_text}\n\nProvider failure fallback reason: {exc}"), reason
+        record_ai_call(result[1])
+        return result
 
     def _schema_text(self, schema: SchemaResponse | None = None) -> str:
         return schema_to_prompt_text(schema or self.schema_service.get_schema())

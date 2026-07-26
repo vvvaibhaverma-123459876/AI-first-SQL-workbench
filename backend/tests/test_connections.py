@@ -57,6 +57,51 @@ def test_create_connection_never_returns_the_password(client, auth_headers, work
     assert "super-secret-value" not in r.text
 
 
+def test_credentials_are_encrypted_at_rest_inspecting_the_raw_db_column(client, auth_headers, workspace_id):
+    """Phase 6's own done-when: "connection credentials are encrypted at
+    rest (verified by inspecting the DB directly)". The test above proves
+    the API's own read path never leaks a secret -- that's necessary but
+    not sufficient, since a bug that stored the config as plaintext would
+    still pass it as long as every response happened to strip the field
+    before serializing. This test instead reads the RAW `encrypted_config`
+    column straight out of the control-plane DB, bypassing
+    connections.service.get_connection() (and therefore crypto.decrypt_config)
+    entirely, for two differently-shaped connectors -- a plain password AND
+    a bearer-token-style secret -- so this isn't just "the postgres
+    password specifically" but the whole encrypted-blob approach
+    (crypto.encrypt_config encrypts the entire config dict as one JSON
+    payload, not per-field)."""
+    import json
+    import uuid
+
+    from app.connections.models import DataConnection
+    from app.db.control_plane_sync import get_sync_session
+
+    secrets = {
+        "postgres": ("db-inspect-postgres", "extremely-secret-db-password", {"connector_type": "postgres", "host": "h", "database": "d", "username": "u", "password": "extremely-secret-db-password"}),
+        "databricks": ("db-inspect-databricks", "dapi_extremely_secret_token_value", {"connector_type": "databricks", "server_hostname": "h", "http_path": "/p", "access_token": "dapi_extremely_secret_token_value"}),
+    }
+    connection_ids = {}
+    for key, (name, _secret, config) in secrets.items():
+        r = client.post(f"/api/workspaces/{workspace_id}/connections", json={"name": name, "config": config}, headers=auth_headers)
+        assert r.status_code == 200, r.text
+        connection_ids[key] = r.json()["id"]
+
+    session = get_sync_session()
+    try:
+        for key, (_name, secret, _config) in secrets.items():
+            row = session.get(DataConnection, uuid.UUID(connection_ids[key]))
+            assert row is not None
+            # The raw stored blob: not the plaintext secret, not even valid
+            # JSON (Fernet's own token format), so this can't pass by
+            # accident of e.g. a dict repr containing the value differently.
+            assert secret not in row.encrypted_config
+            with pytest.raises(json.JSONDecodeError):
+                json.loads(row.encrypted_config)
+    finally:
+        session.close()
+
+
 def test_duplicate_connection_name_in_workspace_is_rejected(client, auth_headers, workspace_id):
     payload = {"name": "dup-conn", "config": {"connector_type": "sqlite", "path": "/tmp/whatever.db"}}
     r = client.post(f"/api/workspaces/{workspace_id}/connections", json=payload, headers=auth_headers)
