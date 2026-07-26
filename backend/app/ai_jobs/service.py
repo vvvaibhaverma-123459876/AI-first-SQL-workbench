@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.ai_jobs.models import AiJob
 from app.ai_jobs.queue import ai_queue
 from app.ai_jobs.tasks import run_ai_task
+from app.connections import service as connections_service
 
 CREATABLE_TASK_TYPES = {"generate", "explain", "repair", "suggest", "investigate"}
 
@@ -29,11 +30,30 @@ class InvalidTaskTypeError(Exception):
     pass
 
 
+class InvalidConnectionError(Exception):
+    pass
+
+
 async def create_job(
     session: AsyncSession, *, workspace_id: uuid.UUID, created_by: uuid.UUID, task_type: str, input: dict
 ) -> AiJob:
     if task_type not in CREATABLE_TASK_TYPES:
         raise InvalidTaskTypeError(f"Unsupported task_type: {task_type!r} (must be one of {sorted(CREATABLE_TASK_TYPES)})")
+
+    # Fail fast here, at creation time, rather than only inside the
+    # background job -- a bad connection_id would otherwise silently queue
+    # a job that's certain to fail, instead of rejecting the request the
+    # caller can immediately act on.
+    connection_id = input.get("connection_id")
+    if connection_id:
+        try:
+            connection_uuid = uuid.UUID(str(connection_id))
+        except ValueError as exc:
+            raise InvalidConnectionError(f"{connection_id!r} is not a valid connection id.") from exc
+        try:
+            await connections_service.get_connection(session, workspace_id=workspace_id, connection_id=connection_uuid)
+        except connections_service.ConnectionNotFoundError as exc:
+            raise InvalidConnectionError(str(exc)) from exc
 
     job = AiJob(workspace_id=workspace_id, task_type=task_type, status="queued", input=input, created_by=created_by)
     session.add(job)

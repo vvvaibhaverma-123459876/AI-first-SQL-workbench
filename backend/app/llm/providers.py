@@ -65,7 +65,22 @@ class MockProvider(BaseLLMProvider):
             return "mock provider cannot semantically rank table relevance for this request"
         if "join path" in prompt_l:
             return "users.user_id = cards.user_id; users.user_id = transactions.user_id"
-        return self._mock_sql_for(self._business_question(prompt))
+        return self._mock_sql_for(self._business_question(prompt), full_prompt=prompt, dialect=self._detect_dialect(prompt_l))
+
+    @staticmethod
+    def _detect_dialect(prompt_l: str) -> str:
+        """generate_sql/repair_sql's prompt literally says "You are an expert
+        {dialect} analyst" (see ai_service.SQL_DIALECT_LABEL) -- Mock has no
+        real understanding of SQL dialects, but reading this back out of the
+        prompt is enough to keep Mock's canned answers dialect-correct for
+        the two dialects this project actually live-tests against (Postgres,
+        MySQL), rather than always emitting SQLite syntax regardless of
+        which connection's schema was passed in."""
+        if "postgresql" in prompt_l:
+            return "postgres"
+        if "mysql" in prompt_l:
+            return "mysql"
+        return "sqlite"
 
     @staticmethod
     def _business_question(prompt: str) -> str:
@@ -83,7 +98,7 @@ class MockProvider(BaseLLMProvider):
     # make every demo question return the same chart, which looks broken rather
     # than "mock". Falls through to the original top-users-by-spend query for
     # anything else, same as before.
-    def _mock_sql_for(self, prompt_l: str) -> str:
+    def _mock_sql_for(self, prompt_l: str, full_prompt: str = "", dialect: str = "sqlite") -> str:
         if "referral" in prompt_l and ("activation" in prompt_l or "card" in prompt_l):
             return (
                 "SELECT r.channel,\n"
@@ -98,8 +113,15 @@ class MockProvider(BaseLLMProvider):
                 "LIMIT 20"
             )
         if "monthly" in prompt_l and "revenue" in prompt_l:
+            # strftime() is SQLite-only -- Postgres/MySQL need their own
+            # month-truncation function, or this "valid-looking" SQL fails
+            # the moment it actually runs against a real connection.
+            month_expr = {
+                "postgres": "to_char(transaction_at, 'YYYY-MM')",
+                "mysql": "DATE_FORMAT(transaction_at, '%Y-%m')",
+            }.get(dialect, "strftime('%Y-%m', transaction_at)")
             return (
-                "SELECT strftime('%Y-%m', transaction_at) AS month, SUM(amount) AS revenue\n"
+                f"SELECT {month_expr} AS month, SUM(amount) AS revenue\n"
                 "FROM transactions\n"
                 "WHERE status = 'success'\n"
                 "GROUP BY month\n"
@@ -132,14 +154,26 @@ class MockProvider(BaseLLMProvider):
                 "ORDER BY avg_days_to_first_transaction ASC\n"
                 "LIMIT 20"
             )
-        return (
-            "SELECT u.user_id, u.full_name, SUM(t.amount) AS total_amount\n"
-            "FROM users u\n"
-            "JOIN transactions t ON u.user_id = t.user_id\n"
-            "GROUP BY u.user_id, u.full_name\n"
-            "ORDER BY total_amount DESC\n"
-            "LIMIT 20"
-        )
+        # Below here is the catch-all for anything not matched above. This
+        # used to be a single hardcoded users/transactions query -- correct
+        # by coincidence when the only schema Mock was ever invoked against
+        # was the bundled demo, but silently wrong for any other schema once
+        # a connection-scoped caller (Phase 3c) can pass an arbitrary one in.
+        # Prefer the demo-shaped answer only when this really is the demo
+        # schema; otherwise fall back to a generic, always-valid query
+        # against whatever table this schema/connection actually has.
+        tables = re.findall(r"(?m)^Table: (\S+)", full_prompt)
+        if "users" in tables and "transactions" in tables:
+            return (
+                "SELECT u.user_id, u.full_name, SUM(t.amount) AS total_amount\n"
+                "FROM users u\n"
+                "JOIN transactions t ON u.user_id = t.user_id\n"
+                "GROUP BY u.user_id, u.full_name\n"
+                "ORDER BY total_amount DESC\n"
+                "LIMIT 20"
+            )
+        first_table = tables[0] if tables else "users"
+        return f"SELECT * FROM {first_table} LIMIT 20"
 
     def status(self) -> dict[str, Any]:
         return {

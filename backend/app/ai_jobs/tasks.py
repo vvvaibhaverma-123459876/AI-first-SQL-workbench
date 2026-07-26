@@ -2,12 +2,15 @@
 never inside the API process. Sync all the way through: a sync DB session
 (app/db/control_plane_sync.py) and AIService's existing sync provider calls.
 
-input/result shape per task_type:
-  generate:    input={"prompt": str}                      -> result={"sql": str, "provider_fallback": str|None}
-  explain:     input={"sql": str}                          -> result=ExplainSQLResponse as dict
-  repair:      input={"sql": str, "error_message": str}    -> result=RepairSQLResponse as dict
-  suggest:     input={"prompt": str}                       -> result=SuggestTablesResponse as dict
-  investigate: input={"question": str}                     -> result={"file_id": str, "summary": str, "provider_fallback": str|None}
+input/result shape per task_type -- all but "explain" additionally accept an
+optional "connection_id" (a DataConnection in this job's workspace): when
+set, schema retrieval, generation, and execution all target that real
+connection instead of the bundled legacy demo database:
+  generate:    input={"prompt": str, "connection_id"?: str}                     -> result={"sql": str, "provider_fallback": str|None}
+  explain:     input={"sql": str}                                               -> result=ExplainSQLResponse as dict
+  repair:      input={"sql": str, "error_message": str, "connection_id"?: str}   -> result=RepairSQLResponse as dict
+  suggest:     input={"prompt": str, "connection_id"?: str}                      -> result=SuggestTablesResponse as dict
+  investigate: input={"question": str, "connection_id"?: str}                   -> result={"file_id": str, "summary": str, "provider_fallback": str|None}
 """
 from __future__ import annotations
 
@@ -16,12 +19,28 @@ from datetime import datetime
 
 from app.ai_jobs.models import AiJob
 from app.api.schemas import AssistantRunResponse
-from app.assistant.orchestrator import AssistantOrchestrator
+from app.assistant.orchestrator import AssistantOrchestrator, schema_for_connection
+from app.connections.models import DataConnection
 from app.db.control_plane_sync import get_sync_session
 from app.db.session import MetadataSessionLocal
 from app.files.models import File
-from app.services.ai_service import AIService
+from app.services.ai_service import SQL_DIALECT_LABEL, AIService
 from app.workspaces.models import AuditLogEntry
+
+
+def _load_connection(job: AiJob) -> DataConnection | None:
+    connection_id = job.input.get("connection_id")
+    if not connection_id:
+        return None
+    session = get_sync_session()
+    try:
+        connection = session.get(DataConnection, uuid.UUID(connection_id))
+        if connection is None or connection.workspace_id != job.workspace_id:
+            raise ValueError(f"Connection {connection_id} not found in this workspace.")
+        session.expunge(connection)  # detach so it stays usable after session.close()
+        return connection
+    finally:
+        session.close()
 
 
 def _finding(response: AssistantRunResponse) -> dict:
@@ -55,16 +74,26 @@ def _run_investigation(job: AiJob) -> dict:
     project's file-centric IDE identity -- it's just a markdown file someone
     can open, edit, and version like anything else in the tree."""
     question = job.input["question"]
+    connection = _load_connection(job)
+    # Fetched once and passed to both orchestrator.run() calls below --
+    # get_schema_sync() builds and disposes a fresh engine per call, real
+    # latency for a remote warehouse (Snowflake/BigQuery/Databricks), no
+    # reason to pay it twice for one investigation.
+    schema = schema_for_connection(connection) if connection is not None else None
+    use_cache = connection is None
+
     orchestrator = AssistantOrchestrator()
     metadata_db = MetadataSessionLocal()
     try:
-        primary = orchestrator.run(metadata_db, question, execute=True, explain=True, use_cache=False)
+        primary = orchestrator.run(metadata_db, question, execute=True, explain=True, use_cache=use_cache, connection=connection, schema=schema)
         findings = [_finding(primary)]
         report_sections = _render_step("Step 1", primary)
 
         followup: AssistantRunResponse | None = None
         if primary.status == "success" and primary.next_questions:
-            followup = orchestrator.run(metadata_db, primary.next_questions[0], execute=True, explain=True, use_cache=False)
+            followup = orchestrator.run(
+                metadata_db, primary.next_questions[0], execute=True, explain=True, use_cache=use_cache, connection=connection, schema=schema
+            )
             findings.append(_finding(followup))
             report_sections += ["", *_render_step("Step 2 (automatic follow-up)", followup)]
     finally:
@@ -106,17 +135,22 @@ def _truncate(text: str, limit: int) -> str:
 
 def _execute(service: AIService, job: AiJob) -> dict:
     task_type, input = job.task_type, job.input
-    if task_type == "generate":
-        sql, fallback_reason = service.generate_sql(input["prompt"])
-        return {"sql": sql, "provider_fallback": fallback_reason}
-    if task_type == "explain":
-        return service.explain_sql(input["sql"]).model_dump()
-    if task_type == "repair":
-        return service.repair_sql(input["sql"], input.get("error_message", "")).model_dump()
-    if task_type == "suggest":
-        return service.suggest_tables(input["prompt"]).model_dump()
     if task_type == "investigate":
         return _run_investigation(job)
+    if task_type == "explain":
+        return service.explain_sql(input["sql"]).model_dump()  # no schema/dialect involved -- explains SQL text the caller already has
+
+    connection = _load_connection(job)
+    schema = schema_for_connection(connection) if connection is not None else None
+    dialect = SQL_DIALECT_LABEL.get(connection.connector_type, "SQLite") if connection is not None else "SQLite"
+
+    if task_type == "generate":
+        sql, fallback_reason = service.generate_sql(input["prompt"], schema=schema, dialect=dialect)
+        return {"sql": sql, "provider_fallback": fallback_reason}
+    if task_type == "repair":
+        return service.repair_sql(input["sql"], input.get("error_message", ""), schema=schema, dialect=dialect).model_dump()
+    if task_type == "suggest":
+        return service.suggest_tables(input["prompt"], schema=schema).model_dump()
     raise ValueError(f"Unsupported task_type: {task_type!r}")
 
 

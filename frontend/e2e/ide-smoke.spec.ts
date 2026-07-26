@@ -90,11 +90,17 @@ test('create a SQLite connection and run a query against it end to end', async (
   await page.screenshot({ path: 'e2e/screenshots/04-query-results.png', fullPage: true })
 })
 
-// Phase 3b: confirms the investigate agent's job-queue round trip actually
-// renders -- submit a question, poll to completion (needs the AI worker
-// running alongside the backend, see the "Start AI worker for e2e smoke
-// test" CI step), then open the report it wrote as a real file in the tree.
-test('investigate a question and open the generated report end to end', async ({ page }) => {
+// Phase 3b/3c: confirms the investigate agent's job-queue round trip
+// actually renders -- submit a question against a real connection (Phase
+// 3c made AI connection-aware; the panel now requires picking one rather
+// than silently falling back to the bundled demo data), poll to completion
+// (needs the AI worker running alongside the backend, see the "Start AI
+// worker for e2e smoke test" CI step), then open the report it wrote as a
+// real file in the tree.
+test('investigate a question against a real connection and open the generated report end to end', async ({ page }) => {
+  const sqlitePath = process.env.PLAYWRIGHT_SQLITE_FIXTURE
+  test.skip(!sqlitePath, 'PLAYWRIGHT_SQLITE_FIXTURE not set')
+
   const email = `smoke-investigate-${Date.now()}@example.com`
   const password = 'correct-horse-battery-staple'
 
@@ -111,8 +117,17 @@ test('investigate a question and open the generated report end to end', async ({
   await page.getByRole('button', { name: 'Create' }).click()
   await expect(page.getByText('No files yet')).toBeVisible({ timeout: 10_000 })
 
+  await page.getByRole('button', { name: 'Connections' }).click()
+  await page.getByTitle('New connection').click()
+  await page.getByPlaceholder('Connection name').fill('widgets-db')
+  await page.locator('select').selectOption('sqlite')
+  await page.getByPlaceholder('File path (on the server)').fill(sqlitePath!)
+  await page.getByRole('button', { name: 'Create' }).click()
+  await expect(page.getByText('widgets-db')).toBeVisible({ timeout: 10_000 })
+
   await page.getByRole('button', { name: 'Investigate' }).click()
-  await page.getByPlaceholder(/why did signups drop/).fill('top users by spend')
+  await expect(page.locator('select')).toContainText('widgets-db')
+  await page.getByPlaceholder(/why did signups drop/).fill('how many widgets are there')
   await page.getByRole('button', { name: 'Run Investigation' }).click()
 
   await expect(page.getByText('done', { exact: true })).toBeVisible({ timeout: 30_000 })
@@ -121,5 +136,6 @@ test('investigate a question and open the generated report end to end', async ({
   await page.getByRole('button', { name: 'Open Report' }).click()
   await expect(page.locator('.monaco-editor').first()).toBeVisible({ timeout: 10_000 })
   await expect(page.locator('.monaco-editor').first()).toContainText('Investigation:')
+  await expect(page.locator('.monaco-editor').first()).toContainText('widgets')
   await page.screenshot({ path: 'e2e/screenshots/06-investigate-report-open.png', fullPage: true })
 })
