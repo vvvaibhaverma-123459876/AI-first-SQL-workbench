@@ -49,7 +49,7 @@ export function ShareDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
-      <div className="panel w-full max-w-md p-5" onClick={(e) => e.stopPropagation()}>
+      <div role="dialog" aria-label={`Share ${resourceName}`} className="panel w-full max-w-md p-5" onClick={(e) => e.stopPropagation()}>
         <div className="mb-1 flex items-center justify-between">
           <div className="text-sm font-semibold text-slate-100">Share "{resourceName}"</div>
           <button className="!border-0 !bg-transparent !p-1" onClick={onClose}>

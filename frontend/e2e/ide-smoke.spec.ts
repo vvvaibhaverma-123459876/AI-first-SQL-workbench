@@ -347,10 +347,11 @@ test('share a file with a second account and confirm they can see and edit it, b
     await owner.getByText('shared-note.md').first().hover()
     await owner.getByTitle('Share').click()
     await owner.getByPlaceholder('Email address').fill(recipientEmail)
-    // exact:true -- "Share" (case-insensitive substring, Playwright's
-    // default for getByRole) would otherwise also match the open tab
-    // button, whose accessible name is "shared-note.md".
-    await owner.getByRole('button', { name: 'Share', exact: true }).click()
+    // Scoped to role="dialog" -- a bare page-wide getByRole('button', { name:
+    // 'Share' }) also matches the FileTree row's hover-revealed icon button
+    // (title="Share" gives it the same accessible name), so exact:true alone
+    // doesn't disambiguate; only one of the two is actually inside the dialog.
+    await owner.getByRole('dialog').getByRole('button', { name: 'Share', exact: true }).click()
     await expect(owner.getByText(recipientEmail)).toBeVisible({ timeout: 10_000 })
     await owner.screenshot({ path: 'e2e/screenshots/12-share-dialog.png', fullPage: true })
     await owner.keyboard.press('Escape')
@@ -375,7 +376,7 @@ test('share a file with a second account and confirm they can see and edit it, b
     await owner.getByTitle('Share').click()
     await owner.getByPlaceholder('Email address').fill(recipientEmail)
     await owner.locator('select').selectOption('editor')
-    await owner.getByRole('button', { name: 'Share', exact: true }).click()
+    await owner.getByRole('dialog').getByRole('button', { name: 'Share', exact: true }).click()
     // The role label text itself is lowercase ("editor") with CSS
     // uppercase styling applied only visually -- Playwright's getByText
     // matches actual DOM text content, not rendered casing.
